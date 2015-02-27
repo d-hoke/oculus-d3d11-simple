@@ -28,8 +28,6 @@ limitations under the License.
 #include "Win32_DX11AppUtil.h"  // Include Non-SDK supporting utilities
 #include "OVR_CAPI.h"           // Include the OculusVR SDK
 
-#include "Win32_RoomTiny_ExampleFeatures.h"  // Include extra options to show some simple operations
-
 #define OVR_D3D_VERSION 11
 #include "OVR_CAPI_D3D.h"  // Include SDK-rendered code for the D3D version
 
@@ -134,7 +132,12 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
         // MAIN LOOP
         // =========
+        int appClock = 0;
+
+
         while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
+            ++appClock;
+
             DX11.HandleMessages();
 
             const float speed = 1.0f;    // Can adjust the movement speed.
@@ -145,7 +148,13 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
             if (hmd) hmd->beginFrame(0);
 
             // Handle key toggles for re-centering, meshes, FOV, etc.
-            if (hmd) ExampleFeatures1(DX11, hmd->getHmd(), &speed, &timesToRenderScene, useHmdToEyeViewOffset);
+            // Recenter the Rift by pressing 'R'
+            if (DX11.Key['R'])
+                hmd->recenterPose();
+
+            // Dismiss the Health and Safety message by pressing any key
+            if (DX11.IsAnyKeyPressed())
+                hmd->dismissHSWDisplay();
 
             // Keyboard inputs to adjust player orientation
             if (DX11.Key[VK_LEFT]) Yaw += 0.02f;
@@ -180,10 +189,6 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
                 float* useYaw = &YawAtRender[eye];
                 bool clearEyeImage = true;
                 bool updateEyeImage = true;
-
-                // Handle key toggles for half-frame rendering, buffer resolution, etc.
-                ExampleFeatures2(DX11, eye, &useBuffer, &useEyePose, &useYaw, &clearEyeImage, &updateEyeImage,
-                    &EyeRenderViewport[eye], EyeRenderTexture[eye]);
 
                 if (clearEyeImage)
                     DX11.ClearAndSetRenderTarget(useBuffer->TexRtv, &EyeDepthBuffer[eye],

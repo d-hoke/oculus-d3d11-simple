@@ -101,8 +101,13 @@ public:
         return res;
     }
 
-    // Temporary
-    ovrHmd getHmd() { return hmd_; }
+    void recenterPose() {
+        ovrHmd_RecenterPose(hmd_);
+    }
+
+    bool dismissHSWDisplay() {
+        return ovrHmd_DismissHSWDisplay(hmd_) != 0;
+    }
 
 private:
     Hmd(ovrHmd hmd) : hmd_(hmd) {}
