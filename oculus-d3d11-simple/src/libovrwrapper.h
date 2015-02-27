@@ -33,7 +33,9 @@ public:
 
     ovrSizei getResolution() const { return hmd_->Resolution; }
 
-    bool testCap(ovrHmdCaps cap) const { return static_cast<ovrHmdCaps>(hmd_->HmdCaps & cap) == cap; }
+    bool testCap(ovrHmdCaps cap) const {
+        return static_cast<ovrHmdCaps>(hmd_->HmdCaps & cap) == cap;
+    }
     void setCap(ovrHmdCaps cap) {
         int enabledCaps = ovrHmd_GetEnabledCaps(hmd_);
         enabledCaps |= cap;
@@ -42,7 +44,9 @@ public:
     // OVR SDK API is a bit confusing here - GetEnabledCaps() is different from HmdCaps even though
     // it uses the same enum - it only deals with caps that can be enabled where HmdCaps deals with
     // hardware caps for the specified HMD.
-    bool getCap(ovrHmdCaps cap) { return static_cast<ovrHmdCaps>(ovrHmd_GetEnabledCaps(hmd_) & cap) == cap; }
+    bool getCap(ovrHmdCaps cap) {
+        return static_cast<ovrHmdCaps>(ovrHmd_GetEnabledCaps(hmd_) & cap) == cap;
+    }
 
     void attachToWindow(void* window) {
         if (!ovrHmd_AttachToWindow(hmd_, window, nullptr, nullptr))
@@ -101,13 +105,9 @@ public:
         return res;
     }
 
-    void recenterPose() {
-        ovrHmd_RecenterPose(hmd_);
-    }
+    void recenterPose() { ovrHmd_RecenterPose(hmd_); }
 
-    bool dismissHSWDisplay() {
-        return ovrHmd_DismissHSWDisplay(hmd_) != 0;
-    }
+    bool dismissHSWDisplay() { return ovrHmd_DismissHSWDisplay(hmd_) != 0; }
 
 private:
     Hmd(ovrHmd hmd) : hmd_(hmd) {}
@@ -124,7 +124,8 @@ public:
     Hmd CreateHmd(int index = 0) {
         ovrHmd hmd = ovrHmd_Create(index);
         if (!hmd) {
-            MessageBoxA(NULL, "Oculus Rift not detected.\nAttempting to create debug HMD.", "", MB_OK);
+            MessageBoxA(NULL, "Oculus Rift not detected.\nAttempting to create debug HMD.", "",
+                        MB_OK);
 
             // If we didn't detect an Hmd, create a simulated one for debugging.
             hmd = ovrHmd_CreateDebug(ovrHmd_DK2);

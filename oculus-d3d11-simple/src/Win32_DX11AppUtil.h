@@ -124,7 +124,6 @@ struct DirectX11 {
     HWND Window = nullptr;
     bool Key[256];
     Sizei RenderTargetSize;
-    //std::unique_ptr<ImageBuffer> MainDepthBuffer;
     ID3D11DevicePtr Device;
     ID3D11DeviceContextPtr Context;
     IDXGISwapChainPtr SwapChain;
@@ -135,7 +134,7 @@ struct DirectX11 {
 
     DirectX11();
     ~DirectX11();
-    bool InitWindowAndDevice(HINSTANCE hinst, Recti vp, bool windowed);
+    bool InitWindowAndDevice(HINSTANCE hinst, Recti vp);
     void InitSecondWindow(HINSTANCE hinst);
     void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, ImageBuffer* depthbuffer,
                                  Recti vp);

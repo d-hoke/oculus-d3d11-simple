@@ -17,11 +17,7 @@ void ThrowOnFailure(HRESULT hr) {
 DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer,
                               size_t size)
     : Size(size) {
-    D3D11_BUFFER_DESC desc{};
-    desc.Usage = D3D11_USAGE_DYNAMIC;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    desc.BindFlags = use;
-    desc.ByteWidth = (unsigned)size;
+    CD3D11_BUFFER_DESC desc(size, use, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
     D3D11_SUBRESOURCE_DATA sr;
     sr.pSysMem = buffer;
     sr.SysMemPitch = sr.SysMemSlicePitch = 0;
@@ -165,16 +161,16 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProc(arg_hwnd, msg, wp, lp);
 }
 
-bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp, bool windowed) {
-    Window = [hinst, vp, windowed, this]{
+bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
+    Window = [hinst, vp, this]{
         const auto className = L"OVRAppWindow";
         WNDCLASSW wc{};
         wc.lpszClassName = className;
         wc.lpfnWndProc = SystemWindowProc;
         RegisterClassW(&wc);
 
-        const DWORD wsStyle = windowed ? (WS_POPUP | WS_OVERLAPPEDWINDOW) : WS_POPUP;
-        const auto sizeDivisor = windowed ? 2 : 1;
+        const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
+        const auto sizeDivisor = 2;
         RECT winSize = {0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, vp.x, vp.y,
@@ -183,15 +179,9 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp, bool windowed) {
     }();
     if (!Window) return false;
 
-    if (windowed) {
-        RenderTargetSize = vp.GetSize();
-    } else {
-        RECT rc;
-        GetClientRect(Window, &rc);
-        RenderTargetSize = Sizei(rc.right - rc.left, rc.bottom - rc.top);
-    }
+    RenderTargetSize = vp.GetSize();
 
-    [this, windowed] {
+    [this] {
         IDXGIFactoryPtr DXGIFactory;
         ThrowOnFailure(
             CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
@@ -216,7 +206,7 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp, bool windowed) {
         scDesc.OutputWindow = Window;
         scDesc.SampleDesc.Count = 1;
         scDesc.SampleDesc.Quality = 0;
-        scDesc.Windowed = windowed;
+        scDesc.Windowed = TRUE;
         scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
         ThrowOnFailure(D3D11CreateDeviceAndSwapChain(
@@ -234,11 +224,6 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp, bool windowed) {
     ThrowOnFailure(Device->CreateRenderTargetView(BackBuffer, nullptr, &BackBufferRT));
     SetDebugObjectName(BackBufferRT, "Direct3D11::BackBufferRT");
 
-    /*
-    MainDepthBuffer = std::make_unique<ImageBuffer>("MainDepthBuffer", Device, Context, true, true,
-                                                    Sizei(RenderTargetSize.w, RenderTargetSize.h));
-                                                    */
-    if (!windowed) ThrowOnFailure(SwapChain->SetFullscreenState(1, nullptr));
 
     UniformBufferGen = std::make_unique<DataBuffer>(Device, D3D11_BIND_CONSTANT_BUFFER, nullptr,
                                                     2000);  // make sure big enough

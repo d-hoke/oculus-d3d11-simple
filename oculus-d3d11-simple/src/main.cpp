@@ -1,5 +1,10 @@
 /************************************************************************************
-Filename    :   Win32_RoomTiny_Main.cpp
+This is a cut down, cleaned up version of the Oculus SDK tiny room demo. 
+Simplifications include SDK distortion and Direct to Rift support only.
+Original copyright notice below:
+
+---
+
 Content     :   First-person view test application for Oculus Rift
 Created     :   October 4, 2012
 Authors     :   Tom Heath, Michael Antonov, Andrew Reisse, Volga Aksoy
@@ -19,11 +24,7 @@ limitations under the License.
 *************************************************************************************/
 
 // This app renders a simple room, with right handed coord system :  Y->Up, Z->Back, X->Right
-// 'W','A','S','D' and arrow keys to navigate. (Other keys in Win32_RoomTiny_ExamplesFeatures.h)
-// 1.  SDK-rendered is the simplest path (this file)
-// 2.  APP-rendered involves other functions, in Win32_RoomTiny_AppRendered.h
-// 3.  Further options are illustrated in Win32_RoomTiny_ExampleFeatures.h
-// 4.  Supporting D3D11 and utility code is in Win32_DX11AppUtil.h
+// 'W','A','S','D' and arrow keys to navigate.
 
 #include "Win32_DX11AppUtil.h"  // Include Non-SDK supporting utilities
 #include "OVR_CAPI.h"           // Include the OculusVR SDK
@@ -45,11 +46,12 @@ using namespace std;
 
 unordered_map<string, string> parseArgs(const char* args) {
     unordered_map<string, string> argMap;
-    regex re{ R"(-((\?)|(\w+))(\s+(\w+))?)" };
-    for_each(cregex_iterator{args, args + strlen(args), re}, cregex_iterator{}, [&](const cmatch m) {
-        argMap[string{ m[1].first, m[1].second }] = string{ m[5].first, m[5].second };
-    });
-    if (argMap.find(string{ "?" }) != end(argMap)) {
+    regex re{R"(-((\?)|(\w+))(\s+(\w+))?)"};
+    for_each(cregex_iterator{args, args + strlen(args), re}, cregex_iterator{},
+             [&](const cmatch m) {
+                 argMap[string{m[1].first, m[1].second}] = string{m[5].first, m[5].second};
+             });
+    if (argMap.find(string{"?"}) != end(argMap)) {
         // Print command line args
     }
     return argMap;
@@ -62,27 +64,28 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
     unique_ptr<Ovr> ovr;
     unique_ptr<Hmd> hmd;
 
-    if (argMap[string{ "oculus" }] != "off") {
+    // Startup with HMD disabled ("-oculus off" on command line) - hmd will be null. This currently
+    // seems preferable to switching oculus on / off at runtime as there's not an obvious way to
+    // make that play nicely with SDK distortion and it also gives us the option of running on
+    // systems that don't have the Rift SDK installed. Also, since Visual Studio Graphics Debugging
+    // currently seems to be incompatible with the OVR SDK this gives us a way to debug rendering
+    // issues.
+    if (argMap[string{"oculus"}] != "off") {
         // Initializes LibOVR, and the Rift
         ovr = make_unique<Ovr>();
         hmd = make_unique<Hmd>(ovr->CreateHmd());
     }
 
-    // MNTODO: handle startup with HMD disabled ("-oculus off" on command line) - hmd will be null
-    // This currently seems preferable to switching oculus on / off as there's not an obvious way to make that play nicely with SDK distortion
-    // and it also gives us the option of running on systems that don't have the Rift SDK installed.
-
     DirectX11 DX11{};
 
     // Setup Window and Graphics - use window frame if relying on Oculus driver
-    bool windowed = !hmd || !hmd->testCap(ovrHmdCap_ExtendDesktop);
-    Recti windowRect = hmd ? Recti(hmd->getWindowsPos(), hmd->getResolution()) : Recti(0, 0, 1280, 720);
-    if (!DX11.InitWindowAndDevice(hinst, windowRect, windowed))
-        return 0;
+    Recti windowRect =
+        hmd ? Recti(hmd->getWindowsPos(), hmd->getResolution()) : Recti(0, 0, 1280, 720);
+    if (!DX11.InitWindowAndDevice(hinst, windowRect)) return 0;
 
     DX11.InitSecondWindow(hinst);
 
-    //DX11.SetMaxFrameLatency(1);
+    // DX11.SetMaxFrameLatency(1);
 
     if (hmd) {
         hmd->attachToWindow(DX11.Window);
@@ -90,7 +93,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
         hmd->setCap(ovrHmdCap_DynamicPrediction);
 
         // Start the sensor which informs of the Rift's pose and motion
-        hmd->configureTracking(ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection | ovrTrackingCap_Position);
+        hmd->configureTracking(ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection |
+                               ovrTrackingCap_Position);
     }
 
     // Make the eye render buffers (caution if actual size < requested due to HW limits).
@@ -99,9 +103,11 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
     ImageBuffer EyeDepthBuffer[2];    // For the eye buffers to use when rendered
 
     for (int eye = 0; eye < 2; ++eye) {
-        auto idealSize = hmd ? hmd->getFovTextureSize(ovrEyeType(eye)) : ovrSizei{ 1024, 1024 };
-        EyeRenderTexture[eye] = ImageBuffer("EyeRenderTexture", DX11.Device, DX11.Context, true, false, idealSize);
-        EyeDepthBuffer[eye] = ImageBuffer("EyeDepthBuffer", DX11.Device, DX11.Context, true, true, EyeRenderTexture[eye].Size);
+        auto idealSize = hmd ? hmd->getFovTextureSize(ovrEyeType(eye)) : ovrSizei{1024, 1024};
+        EyeRenderTexture[eye] =
+            ImageBuffer("EyeRenderTexture", DX11.Device, DX11.Context, true, false, idealSize);
+        EyeDepthBuffer[eye] = ImageBuffer("EyeDepthBuffer", DX11.Device, DX11.Context, true, true,
+                                          EyeRenderTexture[eye].Size);
         EyeRenderViewport[eye].Pos = Vector2i(0, 0);
         EyeRenderViewport[eye].Size = EyeRenderTexture[eye].Size;
     }
@@ -125,7 +131,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
     {
         // Create the room model
-        Scene roomScene(DX11.Device, DX11.Context, false);  // Can simplify scene further with parameter if required.
+        Scene roomScene(DX11.Device, DX11.Context,
+                        false);  // Can simplify scene further with parameter if required.
 
         float Yaw(3.141592f);             // Horizontal rotation of the player
         Vector3f Pos(0.0f, 1.6f, -5.0f);  // Position of player
@@ -133,7 +140,6 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
         // MAIN LOOP
         // =========
         int appClock = 0;
-
 
         while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
             ++appClock;
@@ -149,12 +155,10 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
             // Handle key toggles for re-centering, meshes, FOV, etc.
             // Recenter the Rift by pressing 'R'
-            if (DX11.Key['R'])
-                hmd->recenterPose();
+            if (DX11.Key['R']) hmd->recenterPose();
 
             // Dismiss the Health and Safety message by pressing any key
-            if (DX11.IsAnyKeyPressed())
-                hmd->dismissHSWDisplay();
+            if (DX11.IsAnyKeyPressed()) hmd->dismissHSWDisplay();
 
             // Keyboard inputs to adjust player orientation
             if (DX11.Key[VK_LEFT]) Yaw += 0.02f;
@@ -173,7 +177,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
             // Animate the cube
             if (speed)
-                roomScene.Models[0]->Pos = Vector3f(9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock));
+                roomScene.Models[0]->Pos =
+                    Vector3f(9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock));
 
             // Get both eye poses simultaneously, with IPD offset already included.
             auto tempEyePoses = hmd ? hmd->getEyePoses(0, useHmdToEyeViewOffset)
@@ -192,7 +197,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
                 if (clearEyeImage)
                     DX11.ClearAndSetRenderTarget(useBuffer->TexRtv, &EyeDepthBuffer[eye],
-                    Recti(EyeRenderViewport[eye]));
+                                                 Recti(EyeRenderViewport[eye]));
                 if (updateEyeImage) {
                     // Write in values actually used (becomes significant in Example features)
                     *useEyePose = tempEyePoses.first[eye];
@@ -207,7 +212,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
                     Matrix4f view =
                         Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
-                    Matrix4f proj = ovrMatrix4f_Projection(EyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
+                    Matrix4f proj =
+                        ovrMatrix4f_Projection(EyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
 
                     // Render the scene
                     for (int t = 0; t < timesToRenderScene; t++)
@@ -215,8 +221,11 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
                     // Render undistorted to second window
                     if (eye == ovrEye_Left) {
-                        // MNTODO: clean this up (hard coded width / height, assumption EyeDepthBuffer is big enough...
-                        DX11.ClearAndSetRenderTarget(DX11.secondWindow->BackBufferRT, DX11.secondWindow->DepthBuffer.get(), Recti{ 0, 0, DX11.secondWindow->width, DX11.secondWindow->height });
+                        // MNTODO: clean this up (hard coded width / height, assumption
+                        // EyeDepthBuffer is big enough...
+                        DX11.ClearAndSetRenderTarget(
+                            DX11.secondWindow->BackBufferRT, DX11.secondWindow->DepthBuffer.get(),
+                            Recti{0, 0, DX11.secondWindow->width, DX11.secondWindow->height});
                         roomScene.Render(DX11, view, proj.Transposed());
                         DX11.secondWindow->SwapChain->Present(0, 0);
                     }
@@ -237,7 +246,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
             }
         }
     }
-    
+
     // Release and close down
     if (hmd) hmd->shutdownRendering();
     DX11.ReleaseWindow(hinst);
