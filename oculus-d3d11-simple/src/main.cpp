@@ -85,8 +85,6 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
     DX11.InitSecondWindow(hinst);
 
-    // DX11.SetMaxFrameLatency(1);
-
     if (hmd) {
         hmd->attachToWindow(DX11.Window);
         hmd->setCap(ovrHmdCap_LowPersistence);
@@ -99,15 +97,14 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
     // Make the eye render buffers (caution if actual size < requested due to HW limits).
     ovrRecti EyeRenderViewport[2];    // Useful to remember when varying resolution
-    ImageBuffer EyeRenderTexture[2];  // Where the eye buffers will be rendered
-    ImageBuffer EyeDepthBuffer[2];    // For the eye buffers to use when rendered
+    RenderTarget EyeRenderTexture[2];  // Where the eye buffers will be rendered
+    DepthBuffer EyeDepthBuffer[2];    // For the eye buffers to use when rendered
 
     for (int eye = 0; eye < 2; ++eye) {
         auto idealSize = hmd ? hmd->getFovTextureSize(ovrEyeType(eye)) : ovrSizei{1024, 1024};
         EyeRenderTexture[eye] =
-            ImageBuffer("EyeRenderTexture", DX11.Device, DX11.Context, true, false, idealSize);
-        EyeDepthBuffer[eye] = ImageBuffer("EyeDepthBuffer", DX11.Device, DX11.Context, true, true,
-                                          EyeRenderTexture[eye].Size);
+            RenderTarget("EyeRenderTexture", DX11.Device, idealSize);
+        EyeDepthBuffer[eye] = DepthBuffer("EyeDepthBuffer", DX11.Device, EyeRenderTexture[eye].Size);
         EyeRenderViewport[eye].Pos = Vector2i(0, 0);
         EyeRenderViewport[eye].Size = EyeRenderTexture[eye].Size;
     }
@@ -189,7 +186,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
 
             // Render the two undistorted eye views into their render buffers.
             for (int eye = 0; eye < 2; eye++) {
-                ImageBuffer* useBuffer = &EyeRenderTexture[eye];
+                RenderTarget* useBuffer = &EyeRenderTexture[eye];
                 ovrPosef* useEyePose = &EyeRenderPose[eye];
                 float* useYaw = &YawAtRender[eye];
                 bool clearEyeImage = true;
@@ -224,7 +221,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR args, int) {
                         // MNTODO: clean this up (hard coded width / height, assumption
                         // EyeDepthBuffer is big enough...
                         DX11.ClearAndSetRenderTarget(
-                            DX11.secondWindow->BackBufferRT, DX11.secondWindow->DepthBuffer.get(),
+                            DX11.secondWindow->BackBufferRT, DX11.secondWindow->depthBuffer.get(),
                             Recti{0, 0, DX11.secondWindow->width, DX11.secondWindow->height});
                         roomScene.Render(DX11, view, proj.Transposed());
                         DX11.secondWindow->SwapChain->Present(0, 0);

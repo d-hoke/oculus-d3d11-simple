@@ -14,8 +14,7 @@ void ThrowOnFailure(HRESULT hr) {
     }
 }
 
-DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer,
-                              size_t size)
+DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size)
     : Size(size) {
     CD3D11_BUFFER_DESC desc(size, use, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
     D3D11_SUBRESOURCE_DATA sr;
@@ -25,51 +24,52 @@ DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* bu
     SetDebugObjectName(D3DBuffer, "DataBuffer::D3DBuffer");
 }
 
-void DataBuffer::Refresh(ID3D11DeviceContext* deviceContext, const void* buffer,
-                                size_t size) {
+void DataBuffer::Refresh(ID3D11DeviceContext* deviceContext, const void* buffer, size_t size) {
     D3D11_MAPPED_SUBRESOURCE map;
     deviceContext->Map(D3DBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
     memcpy((void*)map.pData, buffer, size);
     deviceContext->Unmap(D3DBuffer, 0);
 }
 
-ImageBuffer::ImageBuffer(const char* name_, ID3D11Device* device, ID3D11DeviceContext* deviceContext,
-                                bool rendertarget, bool depth, Sizei size, int mipLevels,
-                                unsigned char* data)
+DepthBuffer::DepthBuffer(const char* name_, ID3D11Device* device, Sizei size) : name(name_) {
+    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_D32_FLOAT, size.w, size.h);
+    dsDesc.MipLevels = 1;
+    dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    ID3D11Texture2DPtr tex;
+    device->CreateTexture2D(&dsDesc, nullptr, &tex);
+    SetDebugObjectName(tex, string("DepthBuffer::tex - ") + name);
+    device->CreateDepthStencilView(tex, nullptr, &TexDsv);
+    SetDebugObjectName(TexDsv, string("DepthBuffer::TexDsv - ") + name);
+}
+
+RenderTarget::RenderTarget(const char* name_, ID3D11Device* device, Sizei size)
     : name(name_), Size(size) {
-    CD3D11_TEXTURE2D_DESC dsDesc(depth ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM, size.w,
-                                 size.h, 1, mipLevels);
-
-    if (rendertarget) {
-        if (depth)
-            dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        else
-            dsDesc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-    }
-
+    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, size.w, size.h);
+    dsDesc.MipLevels = 1;
+    dsDesc.BindFlags |= D3D11_BIND_RENDER_TARGET;
     device->CreateTexture2D(&dsDesc, nullptr, &Tex);
-    SetDebugObjectName(Tex, string("ImageBuffer::Tex - ") + name);
+    SetDebugObjectName(Tex, string("RenderTarget::Tex - ") + name);
+    device->CreateShaderResourceView(Tex, nullptr, &TexSv);
+    SetDebugObjectName(TexSv, string("RenderTarget::TexSv - ") + name);
+    device->CreateRenderTargetView(Tex, nullptr, &TexRtv);
+    SetDebugObjectName(TexRtv, string("RenderTarget::TexRtv - ") + name);
+}
 
-    if (!depth) {
-        device->CreateShaderResourceView(Tex, nullptr, &TexSv);
-        SetDebugObjectName(TexSv, string("ImageBuffer::TexSv - ") + name);
-    }
-
-    if (rendertarget) {
-        if (depth) {
-            device->CreateDepthStencilView(Tex, nullptr, &TexDsv);
-            SetDebugObjectName(TexDsv, string("ImageBuffer::TexDsv - ") + name);
-        }
-        else {
-            device->CreateRenderTargetView(Tex, nullptr, &TexRtv);
-            SetDebugObjectName(TexRtv, string("ImageBuffer::TexRtv - ") + name);
-        }
-    }
+ImageBuffer::ImageBuffer(const char* name_, ID3D11Device* device,
+                         ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data)
+    : name(name_) {
+    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, size.w, size.h);
+    ID3D11Texture2DPtr tex;
+    device->CreateTexture2D(&dsDesc, nullptr, &tex);
+    SetDebugObjectName(tex, string("ImageBuffer::tex - ") + name);
+    device->CreateShaderResourceView(tex, nullptr, &TexSv);
+    SetDebugObjectName(TexSv, string("ImageBuffer::TexSv - ") + name);
 
     if (data)  // Note data is trashed, as is width and height
     {
-        for (int level = 0; level < mipLevels; level++) {
-            deviceContext->UpdateSubresource(Tex, level, NULL, data, size.w * 4, size.h * 4);
+        tex->GetDesc(&dsDesc);
+        for (auto level = 0u; level < dsDesc.MipLevels; ++level) {
+            deviceContext->UpdateSubresource(tex, level, NULL, data, size.w * 4, size.h * 4);
             for (int j = 0; j < (size.h & ~1); j += 2) {
                 const uint8_t* psrc = data + (size.w * j * 4);
                 uint8_t* pdest = data + ((size.w >> 1) * (j >> 1) * 4);
@@ -115,7 +115,7 @@ DirectX11::~DirectX11() {
 }
 
 void DirectX11::ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
-                                        ImageBuffer* depthbuffer, Recti vp) {
+                                        DepthBuffer* depthbuffer, Recti vp) {
     float black[] = {0, 0, 0, 1};
     Context->OMSetRenderTargets(1, &rendertarget, depthbuffer->TexDsv);
     Context->ClearRenderTargetView(rendertarget, black);
@@ -162,7 +162,7 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
-    Window = [hinst, vp, this]{
+    Window = [hinst, vp, this] {
         const auto className = L"OVRAppWindow";
         WNDCLASSW wc{};
         wc.lpszClassName = className;
@@ -174,8 +174,8 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
         RECT winSize = {0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, vp.x, vp.y,
-            winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
-            nullptr, hinst, this);
+                             winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
+                             nullptr, hinst, this);
     }();
     if (!Window) return false;
 
@@ -190,10 +190,10 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
         ThrowOnFailure(DXGIFactory->EnumAdapters(0, &Adapter));
 
         const UINT creationFlags = [] {
-#ifdef _DEBUG 
-        return D3D11_CREATE_DEVICE_DEBUG;
-#else 
-        return 0u;
+#ifdef _DEBUG
+            return D3D11_CREATE_DEVICE_DEBUG;
+#else
+            return 0u;
 #endif
         }();
 
@@ -224,11 +224,10 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
     ThrowOnFailure(Device->CreateRenderTargetView(BackBuffer, nullptr, &BackBufferRT));
     SetDebugObjectName(BackBufferRT, "Direct3D11::BackBufferRT");
 
-
     UniformBufferGen = std::make_unique<DataBuffer>(Device, D3D11_BIND_CONSTANT_BUFFER, nullptr,
                                                     2000);  // make sure big enough
 
-    [this]{
+    [this] {
         CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
         ID3D11RasterizerStatePtr Rasterizer;
         ThrowOnFailure(Device->CreateRasterizerState(&rs, &Rasterizer));
@@ -236,7 +235,7 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
         Context->RSSetState(Rasterizer);
     }();
 
-    [this]{
+    [this] {
         CD3D11_DEPTH_STENCIL_DESC dss{D3D11_DEFAULT};
         ID3D11DepthStencilStatePtr DepthState;
         ThrowOnFailure(Device->CreateDepthStencilState(&dss, &DepthState));
@@ -252,35 +251,38 @@ SecondWindow::~SecondWindow() {
     UnregisterClassW(className, hinst);
 }
 
-void SecondWindow::Init(HINSTANCE hinst_, ID3D11Device* device, ID3D11DeviceContext* Context) {
+void SecondWindow::Init(HINSTANCE hinst_, ID3D11Device* device) {
     hinst = hinst_;
     width = 640;
     height = 360;
 
-    Window = [this]{
+    Window = [this] {
         WNDCLASSW wc{};
         wc.lpszClassName = className;
         wc.lpfnWndProc = SystemWindowProc;
         RegisterClassW(&wc);
 
         const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
-        RECT winSize = { 0, 0, width, height };
+        RECT winSize = {0, 0, width, height};
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, 100, 100,
-            winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
-            nullptr, hinst, nullptr);
+                             winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
+                             nullptr, hinst, nullptr);
     }();
-    if (!Window) throw runtime_error{ "Failed to create second window!" };
+    if (!Window) throw runtime_error{"Failed to create second window!"};
 
     [this, device] {
         IDXGIDevice1Ptr DXGIDevice;
-        ThrowOnFailure(device->QueryInterface(__uuidof(IDXGIDevice1), reinterpret_cast<void**>(&DXGIDevice)));
+        ThrowOnFailure(
+            device->QueryInterface(__uuidof(IDXGIDevice1), reinterpret_cast<void**>(&DXGIDevice)));
 
         IDXGIAdapterPtr Adapter;
-        ThrowOnFailure(DXGIDevice->GetParent(__uuidof(IDXGIAdapter), reinterpret_cast<void**>(&Adapter)));
+        ThrowOnFailure(
+            DXGIDevice->GetParent(__uuidof(IDXGIAdapter), reinterpret_cast<void**>(&Adapter)));
 
         IDXGIFactoryPtr DXGIFactory;
-        ThrowOnFailure(Adapter->GetParent(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
+        ThrowOnFailure(
+            Adapter->GetParent(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
 
         DXGI_SWAP_CHAIN_DESC scDesc{};
         scDesc.BufferCount = 2;
@@ -305,13 +307,13 @@ void SecondWindow::Init(HINSTANCE hinst_, ID3D11Device* device, ID3D11DeviceCont
     ThrowOnFailure(device->CreateRenderTargetView(BackBuffer, nullptr, &BackBufferRT));
     SetDebugObjectName(BackBufferRT, "SecondWindow::BackBufferRT");
 
-    DepthBuffer = std::make_unique<ImageBuffer>("SecondWindow::DepthBuffer", device, Context, true, true,
-        Sizei(width, height));
+    depthBuffer =
+        std::make_unique<DepthBuffer>("SecondWindow::DepthBuffer", device, Sizei(width, height));
 }
 
 void DirectX11::InitSecondWindow(HINSTANCE hinst) {
     secondWindow = make_unique<SecondWindow>();
-    secondWindow->Init(hinst, Device, Context);
+    secondWindow->Init(hinst, Device);
 }
 
 void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
@@ -323,7 +325,8 @@ void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indic
     ID3D11Buffer* vertexBuffers[] = {vertices->D3DBuffer};
     Context->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
 
-    UniformBufferGen->Refresh(Context, fill->VShader->UniformData.data(), fill->VShader->UniformData.size());
+    UniformBufferGen->Refresh(Context, fill->VShader->UniformData.data(),
+                              fill->VShader->UniformData.size());
     ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen->D3DBuffer};
     Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
@@ -537,8 +540,8 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
                     tex_pixels[3][j * texWidthHeight + i] =
                         Model::Color(128, 128, 128, 255);  // blank
             }
-        std::unique_ptr<ImageBuffer> t = std::make_unique<ImageBuffer>("generated_texture",
-            device, deviceContext, false, false, Sizei(texWidthHeight, texWidthHeight), 8,
+        std::unique_ptr<ImageBuffer> t = std::make_unique<ImageBuffer>(
+            "generated_texture", device, deviceContext, Sizei(texWidthHeight, texWidthHeight),
             (unsigned char*)tex_pixels[k]);
         generated_texture[k] = std::make_unique<ShaderFill>(
             device, ModelVertexDesc, 3, VertexShaderSrc, PixelShaderSrc, std::move(t));

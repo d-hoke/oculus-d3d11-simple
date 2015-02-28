@@ -55,45 +55,53 @@ _COM_SMARTPTR_TYPEDEF(ID3D10Blob, __uuidof(ID3D10Blob));
 using namespace OVR;
 
 // Helper sets a D3D resource name string (used by PIX and debug layer leak reporting).
-template<typename T, size_t N>
-inline void SetDebugObjectName(_In_ T resource, _In_z_ const char(&name)[N])
-{
+template <typename T>
+inline void SetDebugObjectName(T resource, const char* name, size_t nameLen) {
     ID3D11DeviceChildPtr deviceChild;
     resource->QueryInterface(__uuidof(ID3D11DeviceChild), reinterpret_cast<void**>(&deviceChild));
 #if !defined(NO_D3D11_DEBUG_NAME) && (defined(_DEBUG) || defined(PROFILE))
-    if (deviceChild)
-        deviceChild->SetPrivateData(WKPDID_D3DDebugObjectName, N - 1, name);
+    if (deviceChild) deviceChild->SetPrivateData(WKPDID_D3DDebugObjectName, nameLen, name);
 #else
     UNREFERENCED_PARAMETER(resource);
     UNREFERENCED_PARAMETER(name);
+    UNREFERENCED_PARAMETER(nameLen);
 #endif
 }
 
-template<typename T>
-inline void SetDebugObjectName(_In_ T resource, const std::string& name)
-{
-    ID3D11DeviceChildPtr deviceChild;
-    resource->QueryInterface(__uuidof(ID3D11DeviceChild), reinterpret_cast<void**>(&deviceChild));
-#if !defined(NO_D3D11_DEBUG_NAME) && (defined(_DEBUG) || defined(PROFILE))
-    if (deviceChild)
-        deviceChild->SetPrivateData(WKPDID_D3DDebugObjectName, name.size(), name.c_str());
-#else
-    UNREFERENCED_PARAMETER(resource);
-    UNREFERENCED_PARAMETER(name);
-#endif
+template <typename T, size_t N>
+inline void SetDebugObjectName(T resource, const char(&name)[N]) {
+    SetDebugObjectName(resource, name, N - 1);
 }
 
-struct ImageBuffer {
+template <typename T>
+inline void SetDebugObjectName(T resource, const std::string& name) {
+    SetDebugObjectName(resource, name.c_str(), name.size());
+}
+
+struct DepthBuffer {
+    ID3D11DepthStencilViewPtr TexDsv;
+    std::string name;
+    DepthBuffer() = default;
+    DepthBuffer(const char* name, ID3D11Device* device, Sizei size);
+};
+
+struct RenderTarget {
     ID3D11Texture2DPtr Tex;
     ID3D11ShaderResourceViewPtr TexSv;
     ID3D11RenderTargetViewPtr TexRtv;
-    ID3D11DepthStencilViewPtr TexDsv;
     Sizei Size = Sizei{};
+    std::string name;
+
+    RenderTarget() = default;
+    RenderTarget(const char* name, ID3D11Device* device, Sizei size);
+};
+
+struct ImageBuffer {
+    ID3D11ShaderResourceViewPtr TexSv;
     const char* name = nullptr;
 
     ImageBuffer() = default;
-    ImageBuffer(const char* name, ID3D11Device* device, ID3D11DeviceContext* deviceContext, bool rendertarget,
-                bool depth, Sizei size, int mipLevels = 1, unsigned char* data = NULL);
+    ImageBuffer(const char* name, ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
 };
 
 struct DataBuffer {
@@ -114,10 +122,10 @@ struct SecondWindow {
     IDXGISwapChainPtr SwapChain;
     ID3D11Texture2DPtr BackBuffer;
     ID3D11RenderTargetViewPtr BackBufferRT;
-    std::unique_ptr<ImageBuffer> DepthBuffer;
+    std::unique_ptr<DepthBuffer> depthBuffer;
 
     ~SecondWindow();
-    void Init(HINSTANCE hinst, ID3D11Device* device, ID3D11DeviceContext* context);
+    void Init(HINSTANCE hinst, ID3D11Device* device);
 };
 
 struct DirectX11 {
@@ -136,7 +144,7 @@ struct DirectX11 {
     ~DirectX11();
     bool InitWindowAndDevice(HINSTANCE hinst, Recti vp);
     void InitSecondWindow(HINSTANCE hinst);
-    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, ImageBuffer* depthbuffer,
+    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, DepthBuffer* depthbuffer,
                                  Recti vp);
     void Render(struct ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
                 int count);
