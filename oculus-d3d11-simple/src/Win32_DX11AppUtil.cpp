@@ -14,8 +14,7 @@ void ThrowOnFailure(HRESULT hr) {
     }
 }
 
-DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size)
-    : Size(size) {
+DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size) {
     CD3D11_BUFFER_DESC desc(size, use, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
     D3D11_SUBRESOURCE_DATA sr;
     sr.pSysMem = buffer;
@@ -102,7 +101,6 @@ DirectX11::~DirectX11() {
     secondWindow = nullptr;
     UniformBufferGen = nullptr;
     BackBufferRT = nullptr;
-    BackBuffer = nullptr;
     SwapChain = nullptr;
     Context = nullptr;
 
@@ -217,11 +215,11 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
         SetDebugObjectName(SwapChain, "Direct3D11::SwapChain");
     }();
 
+    ID3D11Texture2DPtr backBuffer;
     ThrowOnFailure(
-        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&BackBuffer)));
-    SetDebugObjectName(BackBuffer, "Direct3D11::BackBuffer");
-
-    ThrowOnFailure(Device->CreateRenderTargetView(BackBuffer, nullptr, &BackBufferRT));
+        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
+    SetDebugObjectName(backBuffer, "Direct3D11 backBuffer");
+    ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
     SetDebugObjectName(BackBufferRT, "Direct3D11::BackBufferRT");
 
     UniformBufferGen = std::make_unique<DataBuffer>(Device, D3D11_BIND_CONSTANT_BUFFER, nullptr,
@@ -300,11 +298,12 @@ void SecondWindow::Init(HINSTANCE hinst_, ID3D11Device* device) {
         SetDebugObjectName(SwapChain, "SecondWindow::SwapChain");
     }();
 
+    ID3D11Texture2DPtr backBuffer;
     ThrowOnFailure(
-        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&BackBuffer)));
-    SetDebugObjectName(BackBuffer, "SecondWindow::BackBuffer");
+        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
+    SetDebugObjectName(backBuffer, "SecondWindow backBuffer");
 
-    ThrowOnFailure(device->CreateRenderTargetView(BackBuffer, nullptr, &BackBufferRT));
+    ThrowOnFailure(device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
     SetDebugObjectName(BackBufferRT, "SecondWindow::BackBufferRT");
 
     depthBuffer =
@@ -344,18 +343,7 @@ void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indic
 }
 
 bool DirectX11::IsAnyKeyPressed() const {
-    for (unsigned i = 0; i < (sizeof(Key) / sizeof(Key[0])); i++)
-        if (Key[i]) return true;
-    return false;
-}
-
-void DirectX11::SetMaxFrameLatency(int value) {
-    IDXGIDevice1Ptr DXGIDevice1;
-    if (FAILED(Device->QueryInterface(__uuidof(IDXGIDevice1),
-                                      reinterpret_cast<void**>(&DXGIDevice1))) ||
-        !DXGIDevice1)
-        return;
-    DXGIDevice1->SetMaximumFrameLatency(value);
+    return any_of(begin(Key), end(Key), [](bool b) { return b; });
 }
 
 void DirectX11::HandleMessages() {
@@ -364,14 +352,6 @@ void DirectX11::HandleMessages() {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-}
-
-void DirectX11::OutputFrameTime(double currentTime) {
-    static double lastTime = 0;
-    char tempString[100];
-    sprintf_s(tempString, "Frame time = %0.2f ms\n", (currentTime - lastTime) * 1000.0f);
-    OutputDebugStringA(tempString);
-    lastTime = currentTime;
 }
 
 void DirectX11::ReleaseWindow(HINSTANCE hinst) {

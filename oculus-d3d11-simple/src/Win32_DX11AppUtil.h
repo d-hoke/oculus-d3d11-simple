@@ -98,7 +98,7 @@ struct RenderTarget {
 
 struct ImageBuffer {
     ID3D11ShaderResourceViewPtr TexSv;
-    const char* name = nullptr;
+    std::string name;
 
     ImageBuffer() = default;
     ImageBuffer(const char* name, ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
@@ -106,7 +106,6 @@ struct ImageBuffer {
 
 struct DataBuffer {
     ID3D11BufferPtr D3DBuffer;
-    size_t Size;
 
     DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size);
 
@@ -120,7 +119,6 @@ struct SecondWindow {
     int height = 0;
     HWND Window = nullptr;
     IDXGISwapChainPtr SwapChain;
-    ID3D11Texture2DPtr BackBuffer;
     ID3D11RenderTargetViewPtr BackBufferRT;
     std::unique_ptr<DepthBuffer> depthBuffer;
 
@@ -135,7 +133,6 @@ struct DirectX11 {
     ID3D11DevicePtr Device;
     ID3D11DeviceContextPtr Context;
     IDXGISwapChainPtr SwapChain;
-    ID3D11Texture2DPtr BackBuffer;
     ID3D11RenderTargetViewPtr BackBufferRT;
     std::unique_ptr<DataBuffer> UniformBufferGen;
     std::unique_ptr<SecondWindow> secondWindow;
@@ -149,9 +146,7 @@ struct DirectX11 {
     void Render(struct ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
                 int count);
     bool IsAnyKeyPressed() const;
-    void SetMaxFrameLatency(int value);
     void HandleMessages();
-    void OutputFrameTime(double currentTime);
     void ReleaseWindow(HINSTANCE hinst);
 };
 
@@ -246,19 +241,3 @@ struct Scene {
 
     void Render(DirectX11& dx11, Matrix4f view, Matrix4f proj);
 };
-
-//--------------------------------------------------------------------------------
-// Due to be removed once the functionality is in the SDK
-inline void UtilFoldExtraYawIntoTimewarpMatrix(Matrix4f* timewarpMatrix, Quatf eyePose, Quatf extraQuat) {
-    timewarpMatrix->M[0][1] = -timewarpMatrix->M[0][1];
-    timewarpMatrix->M[0][2] = -timewarpMatrix->M[0][2];
-    timewarpMatrix->M[1][0] = -timewarpMatrix->M[1][0];
-    timewarpMatrix->M[2][0] = -timewarpMatrix->M[2][0];
-    Quatf newtimewarpStartQuat =
-        eyePose * extraQuat * (eyePose.Inverted()) * (Quatf(*timewarpMatrix));
-    *timewarpMatrix = Matrix4f(newtimewarpStartQuat);
-    timewarpMatrix->M[0][1] = -timewarpMatrix->M[0][1];
-    timewarpMatrix->M[0][2] = -timewarpMatrix->M[0][2];
-    timewarpMatrix->M[1][0] = -timewarpMatrix->M[1][0];
-    timewarpMatrix->M[2][0] = -timewarpMatrix->M[2][0];
-}
