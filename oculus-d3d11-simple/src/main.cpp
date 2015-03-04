@@ -91,7 +91,11 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
             ++appClock;
 
-            DX11.HandleMessages();
+            MSG msg;
+            if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
 
             const float speed = 1.0f;    // Can adjust the movement speed.
             int timesToRenderScene = 1;  // Can adjust the render burden on the app.
@@ -138,8 +142,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
                 bool updateEyeImage = true;
 
                 if (clearEyeImage)
-                    DX11.ClearAndSetRenderTarget(useTarget.rtv, useTarget.dsv,
-                                                 Recti(useTarget.viewport));
+                    DX11.ClearAndSetEyeTarget(useTarget);
                 if (updateEyeImage) {
                     // Get view and projection matrices (note near Z to reduce eye strain)
                     Matrix4f rollPitchYaw = Matrix4f::RotationY(Yaw);

@@ -142,6 +142,12 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         ThrowOnFailure(Device->CreateDepthStencilState(&dss, &DepthState));
         Context->OMSetDepthStencilState(DepthState, 0);
     }();
+
+    CD3D11_SAMPLER_DESC ss{ D3D11_DEFAULT };
+    ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    ss.Filter = D3D11_FILTER_ANISOTROPIC;
+    ss.MaxAnisotropy = 8;
+    Device->CreateSamplerState(&ss, &SamplerState);
 }
 
 DirectX11::~DirectX11() {
@@ -152,25 +158,26 @@ DirectX11::~DirectX11() {
     UnregisterClassW(L"OVRAppWindow", hinst);
 }
 
-void DirectX11::ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
-                                        ID3D11DepthStencilView* dsv, Recti vp) {
+void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     const float black[] = {0.f, 0.f, 0.f, 1.f};
-    Context->OMSetRenderTargets(1, &rendertarget, dsv);
-    Context->ClearRenderTargetView(rendertarget, black);
-    Context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
+    ID3D11RenderTargetView* rtvs[] = { eyeTarget.rtv };
+    Context->OMSetRenderTargets(1, rtvs, eyeTarget.dsv);
+    Context->ClearRenderTargetView(eyeTarget.rtv, black);
+    Context->ClearDepthStencilView(eyeTarget.dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
     D3D11_VIEWPORT d3dvp;
-    d3dvp.TopLeftX = static_cast<float>(vp.x);
-    d3dvp.TopLeftY = static_cast<float>(vp.y);
-    d3dvp.Width = static_cast<float>(vp.w);
-    d3dvp.Height = static_cast<float>(vp.h);
+    d3dvp.TopLeftX = static_cast<float>(eyeTarget.viewport.Pos.x);
+    d3dvp.TopLeftY = static_cast<float>(eyeTarget.viewport.Pos.y);
+    d3dvp.Width = static_cast<float>(eyeTarget.viewport.Size.w);
+    d3dvp.Height = static_cast<float>(eyeTarget.viewport.Size.h);
     d3dvp.MinDepth = 0.f;
     d3dvp.MaxDepth = 1.f;
     Context->RSSetViewports(1, &d3dvp);
 }
 
-void DirectX11::Render(ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* indices, UINT stride,
-                       int count) {
-    Context->IASetInputLayout(fill->InputLayout);
+void DirectX11::Render(VertexShader* vertexShader, ID3D11PixelShader* pixelShader,
+                       ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
+                       ID3D11Buffer* indices, UINT stride, int count) {
+    Context->IASetInputLayout(inputLayout);
     Context->IASetIndexBuffer(indices, DXGI_FORMAT_R16_UINT, 0);
 
     UINT offset = 0;
@@ -179,20 +186,20 @@ void DirectX11::Render(ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* i
 
     D3D11_MAPPED_SUBRESOURCE map;
     Context->Map(UniformBufferGen, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
-    memcpy(map.pData, fill->VShader->UniformData.data(), fill->VShader->UniformData.size());
+    memcpy(map.pData, vertexShader->UniformData.data(), vertexShader->UniformData.size());
     Context->Unmap(UniformBufferGen, 0);
 
     ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen};
     Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
     Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    Context->VSSetShader(fill->VShader->D3DVert, nullptr, 0);
-    Context->PSSetShader(fill->PShader->D3DPix, nullptr, 0);
-    ID3D11SamplerState* samplerStates[] = {fill->SamplerState};
+    Context->VSSetShader(vertexShader->D3DVert, nullptr, 0);
+    Context->PSSetShader(pixelShader, nullptr, 0);
+    ID3D11SamplerState* samplerStates[] = { SamplerState };
     Context->PSSetSamplers(0, 1, samplerStates);
 
-    if (fill->textureSrv) {
-        ID3D11ShaderResourceView* srvs[] = {fill->textureSrv};
+    if (texSrv) {
+        ID3D11ShaderResourceView* srvs[] = {texSrv};
         Context->PSSetShaderResources(0, 1, srvs);
     }
     Context->DrawIndexed(count, 0, 0);
@@ -202,58 +209,28 @@ bool DirectX11::IsAnyKeyPressed() const {
     return any_of(begin(Key), end(Key), [](bool b) { return b; });
 }
 
-void DirectX11::HandleMessages() {
-    MSG msg;
-    if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-}
-
-ShaderFill::ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader,
-                       ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv)
-    : VShader(vertexShader), PShader(pixelShader), InputLayout(inputLayout), textureSrv(texSrv) {
-    CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
-    ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-    ss.Filter = D3D11_FILTER_ANISOTROPIC;
-    ss.MaxAnisotropy = 8;
-    device->CreateSamplerState(&ss, &SamplerState);
-}
-
-Shader::Shader(ID3D11Device* device, ID3D10Blob* s, int which_type) {
-    if (which_type == 0)
-        ThrowOnFailure(
-            device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert));
-    else
-        ThrowOnFailure(
-            device->CreatePixelShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DPix));
+VertexShader::VertexShader(ID3D11Device* device, ID3D10Blob* s) {
+    ThrowOnFailure(
+        device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert));
 
     ID3D11ShaderReflectionPtr ref;
-    D3DReflect(s->GetBufferPointer(), s->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&ref);
+    D3DReflect(s->GetBufferPointer(), s->GetBufferSize(), IID_ID3D11ShaderReflection,
+               reinterpret_cast<void**>(&ref));
     ID3D11ShaderReflectionConstantBuffer* buf = ref->GetConstantBufferByIndex(0);
     D3D11_SHADER_BUFFER_DESC bufd;
-    if (FAILED(buf->GetDesc(&bufd))) return;
+    ThrowOnFailure(buf->GetDesc(&bufd));
 
     for (unsigned i = 0; i < bufd.Variables; ++i) {
         ID3D11ShaderReflectionVariable* var = buf->GetVariableByIndex(i);
         D3D11_SHADER_VARIABLE_DESC vd;
         var->GetDesc(&vd);
-        Uniform u;
-        strcpy_s(u.Name, (const char*)vd.Name);
-        u.Offset = vd.StartOffset;
-        u.Size = vd.Size;
-        UniformInfo.push_back(u);
+        UniformOffsets[vd.Name] = vd.StartOffset;
     }
     UniformData.resize(bufd.Size);
 }
 
-void Shader::SetUniform(const char* name, int n, const float* v) {
-    for (const auto& uniform : UniformInfo) {
-        if (!strcmp(uniform.Name, name)) {
-            memcpy(UniformData.data() + uniform.Offset, v, n * sizeof(float));
-            return;
-        }
-    }
+void VertexShader::SetUniform(const char* name, int n, const float* v) {
+    memcpy(UniformData.data() + UniformOffsets[name], v, n * sizeof(float));
 }
 
 void Model::AllocateBuffers(ID3D11Device* device) {
@@ -320,6 +297,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
          D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
 
+    ID3D10BlobPtr blobData;
     const char* VertexShaderSrc = R"(
         float4x4 Proj, View;
         float4 NewCol;
@@ -330,6 +308,13 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
             oTexCoord = TexCoord; 
             oColor = Color; 
         })";
+
+    ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), nullptr, nullptr, nullptr,
+                              "main", "vs_4_0", 0, 0, &blobData, nullptr));
+    VShader = std::make_unique<VertexShader>(device, blobData);
+    device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
+                              blobData->GetBufferSize(), &InputLayout);
+
     const char* PixelShaderSrc = R"(
         Texture2D Texture : register(t0);
         SamplerState Linear : register(s0); 
@@ -338,22 +323,18 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
             return Color * Texture.Sample(Linear, TexCoord);
         })";
 
-    ID3D10BlobPtr blobData;
-    ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), NULL, NULL, NULL, "main",
-                              "vs_4_0", 0, 0, &blobData, NULL));
-    VShader = std::make_unique<Shader>(device, blobData, 0);
-    device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
-                              blobData->GetBufferSize(), &InputLayout);
-
-    ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), NULL, NULL, NULL, "main",
-                              "ps_4_0", 0, 0, &blobData, NULL));
-    PShader = std::make_unique<Shader>(device, blobData, 1);
+    ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), nullptr, nullptr, nullptr,
+                              "main", "ps_4_0", 0, 0, &blobData, nullptr));
+    [device, blobData, this] {
+        ThrowOnFailure(device->CreatePixelShader(blobData->GetBufferPointer(),
+                                                 blobData->GetBufferSize(), nullptr, &PShader));
+    }();
 
     // Construct textures
     const auto texWidthHeight = 256;
     const auto texCount = 5;
     static Model::Color tex_pixels[texCount][texWidthHeight * texWidthHeight];
-    std::unique_ptr<ShaderFill> generated_texture[texCount];
+    ID3D11ShaderResourceViewPtr generated_texture[texCount];
 
     for (int k = 0; k < texCount; ++k) {
         for (int j = 0; j < texWidthHeight; ++j)
@@ -377,12 +358,12 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
                         Model::Color(128, 128, 128, 255);  // blank
             }
 
-        ID3D11ShaderResourceViewPtr texSrv;
-        [device, deviceContext, texWidthHeight, &texSrv](unsigned char* data) {
+        generated_texture[k] = [device, deviceContext, texWidthHeight](unsigned char* data) {
             CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, texWidthHeight,
                                          texWidthHeight);
             ID3D11Texture2DPtr tex;
             device->CreateTexture2D(&dsDesc, nullptr, &tex);
+            ID3D11ShaderResourceViewPtr texSrv;
             device->CreateShaderResourceView(tex, nullptr, &texSrv);
 
             // Note data is trashed
@@ -406,9 +387,8 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
                 }
                 wh >>= 1;
             }
+            return texSrv;
         }(&tex_pixels[k][0].R);
-        generated_texture[k] =
-            std::make_unique<ShaderFill>(device, VShader.get(), PShader.get(), InputLayout, texSrv);
     }
 
     // Construct geometry
@@ -493,10 +473,10 @@ void Scene::Render(DirectX11& dx11, Matrix4f view, Matrix4f proj) {
         Matrix4f modelmat = model->GetMatrix();
         Matrix4f mat = (view * modelmat).Transposed();
 
-        model->Fill->VShader->SetUniform("View", 16, (float*)&mat);
-        model->Fill->VShader->SetUniform("Proj", 16, (float*)&proj);
+        VShader->SetUniform("View", 16, (float*)&mat);
+        VShader->SetUniform("Proj", 16, (float*)&proj);
 
-        dx11.Render(model->Fill.get(), model->VertexBuffer, model->IndexBuffer,
+        dx11.Render(VShader.get(), PShader, InputLayout, model->textureSrv, model->VertexBuffer, model->IndexBuffer,
                     sizeof(Model::Vertex), model->Indices.size());
     }
 }

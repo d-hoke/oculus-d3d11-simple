@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <comdef.h>
@@ -63,9 +64,18 @@ struct EyeTarget {
     ID3D11DepthStencilViewPtr dsv;
     ovrRecti viewport;
     Sizei size;
-    
-    EyeTarget() = default;
+
     EyeTarget(ID3D11Device* device, Sizei size);
+};
+
+struct VertexShader {
+    ID3D11VertexShaderPtr D3DVert;
+    std::vector<unsigned char> UniformData;
+    std::unordered_map<std::string, int> UniformOffsets;
+
+    VertexShader(ID3D11Device* device, ID3D10Blob* s);
+
+    void SetUniform(const char* name, int n, const float* v);
 };
 
 struct DirectX11 {
@@ -77,45 +87,15 @@ struct DirectX11 {
     IDXGISwapChainPtr SwapChain;
     ID3D11RenderTargetViewPtr BackBufferRT;
     ID3D11BufferPtr UniformBufferGen;
+    ID3D11SamplerStatePtr SamplerState;
 
     DirectX11(HINSTANCE hinst, Recti vp);
     ~DirectX11();
-    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
-                                 ID3D11DepthStencilView* depthbuffer, Recti vp);
-    void Render(struct ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* indices, UINT stride,
-                int count);
+    void ClearAndSetEyeTarget(const EyeTarget& eyeTarget);
+    void Render(VertexShader* vertexShader, ID3D11PixelShader* pixelShader,
+                ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
+                ID3D11Buffer* indices, UINT stride, int count);
     bool IsAnyKeyPressed() const;
-    void HandleMessages();
-    void ReleaseWindow(HINSTANCE hinst);
-};
-
-struct Shader {
-    ID3D11VertexShaderPtr D3DVert;
-    ID3D11PixelShaderPtr D3DPix;
-    std::vector<unsigned char> UniformData;
-
-    struct Uniform {
-        char Name[40];
-        int Offset, Size;
-    };
-
-    std::vector<Uniform> UniformInfo;
-
-    Shader(ID3D11Device* device, ID3D10Blob* s, int which_type);
-
-    void SetUniform(const char* name, int n, const float* v);
-};
-
-struct ShaderFill {
-    Shader* VShader;
-    Shader* PShader;
-    ID3D11InputLayout* InputLayout;
-
-    //std::unique_ptr<ImageBuffer> OneTexture;
-    ID3D11ShaderResourceViewPtr textureSrv;
-    ID3D11SamplerStatePtr SamplerState;
-
-    ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader, ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv);
 };
 
 struct Model {
@@ -133,31 +113,23 @@ struct Model {
 
     Vector3f Pos;
     Quatf Rot;
-    Matrix4f Mat;
     std::vector<Vertex> Vertices;
     std::vector<uint16_t> Indices;
-    std::unique_ptr<ShaderFill> Fill;
     ID3D11BufferPtr VertexBuffer;
     ID3D11BufferPtr IndexBuffer;
+    ID3D11ShaderResourceViewPtr textureSrv;
 
-    Model(Vector3f arg_pos, std::unique_ptr<ShaderFill>&& arg_Fill) {
-        Pos = arg_pos;
-        Fill = std::move(arg_Fill);
-    }
+    Model(Vector3f pos_, ID3D11ShaderResourceView* texSrv) : Pos(pos_), textureSrv(texSrv) {}
 
-    Matrix4f& GetMatrix() {
-        Mat = Matrix4f(Rot);
-        Mat = Matrix4f::Translation(Pos) * Mat;
-        return Mat;
-    }
+    Matrix4f GetMatrix() { return Matrix4f::Translation(Pos) * Matrix4f(Rot); }
     void AllocateBuffers(ID3D11Device* device);
     void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2,
                                  Color c);
 };
 
 struct Scene {
-    std::unique_ptr<Shader> VShader;
-    std::unique_ptr<Shader> PShader;
+    std::unique_ptr<VertexShader> VShader;
+    ID3D11PixelShaderPtr PShader;
     ID3D11InputLayoutPtr InputLayout;
     std::vector<std::unique_ptr<Model>> Models;
 
