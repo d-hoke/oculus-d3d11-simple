@@ -68,13 +68,6 @@ struct EyeTarget {
     EyeTarget(ID3D11Device* device, Sizei size);
 };
 
-struct ImageBuffer {
-    ID3D11ShaderResourceViewPtr TexSv;
-
-    ImageBuffer() = default;
-    ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
-};
-
 struct DirectX11 {
     HINSTANCE hinst = nullptr;
     HWND Window = nullptr;
@@ -118,10 +111,11 @@ struct ShaderFill {
     Shader* PShader;
     ID3D11InputLayout* InputLayout;
 
-    std::unique_ptr<ImageBuffer> OneTexture;
+    //std::unique_ptr<ImageBuffer> OneTexture;
+    ID3D11ShaderResourceViewPtr textureSrv;
     ID3D11SamplerStatePtr SamplerState;
 
-    ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader, ID3D11InputLayout* inputLayout, std::unique_ptr<ImageBuffer>&& t);
+    ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader, ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv);
 };
 
 struct Model {

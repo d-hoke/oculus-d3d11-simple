@@ -35,40 +35,6 @@ EyeTarget::EyeTarget(ID3D11Device* device, Sizei requestedSize) {
     viewport.Size = Sizei(texDesc.Width, texDesc.Height);
 }
 
-ImageBuffer::ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size,
-                         unsigned char* data) {
-    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, size.w, size.h);
-    ID3D11Texture2DPtr tex;
-    device->CreateTexture2D(&dsDesc, nullptr, &tex);
-    device->CreateShaderResourceView(tex, nullptr, &TexSv);
-
-    // Note data is trashed, as is width and height
-    tex->GetDesc(&dsDesc);
-    for (auto level = 0u; level < dsDesc.MipLevels; ++level) {
-        deviceContext->UpdateSubresource(tex, level, NULL, data, size.w * 4, size.h * 4);
-        for (int j = 0; j < (size.h & ~1); j += 2) {
-            const uint8_t* psrc = data + (size.w * j * 4);
-            uint8_t* pdest = data + ((size.w >> 1) * (j >> 1) * 4);
-            for (int i = 0; i < (size.w >> 1); ++i, psrc += 8, pdest += 4) {
-                pdest[0] =
-                    (((int)psrc[0]) + psrc[4] + psrc[size.w * 4 + 0] + psrc[size.w * 4 + 4]) >>
-                    2;
-                pdest[1] =
-                    (((int)psrc[1]) + psrc[5] + psrc[size.w * 4 + 1] + psrc[size.w * 4 + 5]) >>
-                    2;
-                pdest[2] =
-                    (((int)psrc[2]) + psrc[6] + psrc[size.w * 4 + 2] + psrc[size.w * 4 + 6]) >>
-                    2;
-                pdest[3] =
-                    (((int)psrc[3]) + psrc[7] + psrc[size.w * 4 + 3] + psrc[size.w * 4 + 7]) >>
-                    2;
-            }
-        }
-        size.w >>= 1;
-        size.h >>= 1;
-    }
-}
-
 LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     static DirectX11* dx11 = nullptr;
 
@@ -158,7 +124,8 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
     ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
 
     {
-        CD3D11_BUFFER_DESC desc(2000, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+        CD3D11_BUFFER_DESC desc(2000, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC,
+                                D3D11_CPU_ACCESS_WRITE);
         ThrowOnFailure(Device->CreateBuffer(&desc, nullptr, &UniformBufferGen));
     }
 
@@ -224,8 +191,8 @@ void DirectX11::Render(ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* i
     ID3D11SamplerState* samplerStates[] = {fill->SamplerState};
     Context->PSSetSamplers(0, 1, samplerStates);
 
-    if (fill->OneTexture) {
-        ID3D11ShaderResourceView* srvs[] = {fill->OneTexture->TexSv};
+    if (fill->textureSrv) {
+        ID3D11ShaderResourceView* srvs[] = {fill->textureSrv};
         Context->PSSetShaderResources(0, 1, srvs);
     }
     Context->DrawIndexed(count, 0, 0);
@@ -244,11 +211,8 @@ void DirectX11::HandleMessages() {
 }
 
 ShaderFill::ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader,
-                       ID3D11InputLayout* inputLayout, std::unique_ptr<ImageBuffer>&& t)
-    : VShader(vertexShader),
-      PShader(pixelShader),
-      InputLayout(inputLayout),
-      OneTexture(std::move(t)) {
+                       ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv)
+    : VShader(vertexShader), PShader(pixelShader), InputLayout(inputLayout), textureSrv(texSrv) {
     CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
     ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     ss.Filter = D3D11_FILTER_ANISOTROPIC;
@@ -295,11 +259,13 @@ void Shader::SetUniform(const char* name, int n, const float* v) {
 void Model::AllocateBuffers(ID3D11Device* device) {
     D3D11_SUBRESOURCE_DATA sr{};
 
-    const CD3D11_BUFFER_DESC vbdesc(Vertices.size() * sizeof(Vertices[0]), D3D11_BIND_VERTEX_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+    const CD3D11_BUFFER_DESC vbdesc(Vertices.size() * sizeof(Vertices[0]), D3D11_BIND_VERTEX_BUFFER,
+                                    D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
     sr.pSysMem = Vertices.data();
     ThrowOnFailure(device->CreateBuffer(&vbdesc, &sr, &VertexBuffer));
 
-    const CD3D11_BUFFER_DESC ibdesc(Indices.size() * sizeof(Indices[0]), D3D11_BIND_INDEX_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+    const CD3D11_BUFFER_DESC ibdesc(Indices.size() * sizeof(Indices[0]), D3D11_BIND_INDEX_BUFFER,
+                                    D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
     sr.pSysMem = Indices.data();
     ThrowOnFailure(device->CreateBuffer(&ibdesc, &sr, &IndexBuffer));
 }
@@ -410,11 +376,39 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
                     tex_pixels[3][j * texWidthHeight + i] =
                         Model::Color(128, 128, 128, 255);  // blank
             }
-        std::unique_ptr<ImageBuffer> t = std::make_unique<ImageBuffer>(
-            device, deviceContext, Sizei(texWidthHeight, texWidthHeight),
-            (unsigned char*)tex_pixels[k]);
-        generated_texture[k] = std::make_unique<ShaderFill>(device, VShader.get(), PShader.get(),
-                                                            InputLayout, std::move(t));
+
+        ID3D11ShaderResourceViewPtr texSrv;
+        [device, deviceContext, texWidthHeight, &texSrv](unsigned char* data) {
+            CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, texWidthHeight,
+                                         texWidthHeight);
+            ID3D11Texture2DPtr tex;
+            device->CreateTexture2D(&dsDesc, nullptr, &tex);
+            device->CreateShaderResourceView(tex, nullptr, &texSrv);
+
+            // Note data is trashed
+            auto wh = texWidthHeight;
+            tex->GetDesc(&dsDesc);
+            for (auto level = 0u; level < dsDesc.MipLevels; ++level) {
+                deviceContext->UpdateSubresource(tex, level, nullptr, data, wh * 4, wh * 4);
+                for (int j = 0; j < (wh & ~1); j += 2) {
+                    const uint8_t* psrc = data + (wh * j * 4);
+                    uint8_t* pdest = data + ((wh >> 1) * (j >> 1) * 4);
+                    for (int i = 0; i < (wh >> 1); ++i, psrc += 8, pdest += 4) {
+                        pdest[0] =
+                            (((int)psrc[0]) + psrc[4] + psrc[wh * 4 + 0] + psrc[wh * 4 + 4]) >> 2;
+                        pdest[1] =
+                            (((int)psrc[1]) + psrc[5] + psrc[wh * 4 + 1] + psrc[wh * 4 + 5]) >> 2;
+                        pdest[2] =
+                            (((int)psrc[2]) + psrc[6] + psrc[wh * 4 + 2] + psrc[wh * 4 + 6]) >> 2;
+                        pdest[3] =
+                            (((int)psrc[3]) + psrc[7] + psrc[wh * 4 + 3] + psrc[wh * 4 + 7]) >> 2;
+                    }
+                }
+                wh >>= 1;
+            }
+        }(&tex_pixels[k][0].R);
+        generated_texture[k] =
+            std::make_unique<ShaderFill>(device, VShader.get(), PShader.get(), InputLayout, texSrv);
     }
 
     // Construct geometry
