@@ -14,21 +14,6 @@ void ThrowOnFailure(HRESULT hr) {
     }
 }
 
-DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size) {
-    CD3D11_BUFFER_DESC desc(size, use, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
-    D3D11_SUBRESOURCE_DATA sr;
-    sr.pSysMem = buffer;
-    sr.SysMemPitch = sr.SysMemSlicePitch = 0;
-    ThrowOnFailure(device->CreateBuffer(&desc, buffer ? &sr : nullptr, &D3DBuffer));
-}
-
-void DataBuffer::Refresh(ID3D11DeviceContext* deviceContext, const void* buffer, size_t size) {
-    D3D11_MAPPED_SUBRESOURCE map;
-    deviceContext->Map(D3DBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
-    memcpy((void*)map.pData, buffer, size);
-    deviceContext->Unmap(D3DBuffer, 0);
-}
-
 EyeTarget::EyeTarget(ID3D11Device* device, Sizei requestedSize) {
     CD3D11_TEXTURE2D_DESC texDesc(DXGI_FORMAT_R8G8B8A8_UNORM, requestedSize.w, requestedSize.h);
     texDesc.MipLevels = 1;
@@ -57,32 +42,30 @@ ImageBuffer::ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContex
     device->CreateTexture2D(&dsDesc, nullptr, &tex);
     device->CreateShaderResourceView(tex, nullptr, &TexSv);
 
-    if (data)  // Note data is trashed, as is width and height
-    {
-        tex->GetDesc(&dsDesc);
-        for (auto level = 0u; level < dsDesc.MipLevels; ++level) {
-            deviceContext->UpdateSubresource(tex, level, NULL, data, size.w * 4, size.h * 4);
-            for (int j = 0; j < (size.h & ~1); j += 2) {
-                const uint8_t* psrc = data + (size.w * j * 4);
-                uint8_t* pdest = data + ((size.w >> 1) * (j >> 1) * 4);
-                for (int i = 0; i<size.w>> 1; i++, psrc += 8, pdest += 4) {
-                    pdest[0] =
-                        (((int)psrc[0]) + psrc[4] + psrc[size.w * 4 + 0] + psrc[size.w * 4 + 4]) >>
-                        2;
-                    pdest[1] =
-                        (((int)psrc[1]) + psrc[5] + psrc[size.w * 4 + 1] + psrc[size.w * 4 + 5]) >>
-                        2;
-                    pdest[2] =
-                        (((int)psrc[2]) + psrc[6] + psrc[size.w * 4 + 2] + psrc[size.w * 4 + 6]) >>
-                        2;
-                    pdest[3] =
-                        (((int)psrc[3]) + psrc[7] + psrc[size.w * 4 + 3] + psrc[size.w * 4 + 7]) >>
-                        2;
-                }
+    // Note data is trashed, as is width and height
+    tex->GetDesc(&dsDesc);
+    for (auto level = 0u; level < dsDesc.MipLevels; ++level) {
+        deviceContext->UpdateSubresource(tex, level, NULL, data, size.w * 4, size.h * 4);
+        for (int j = 0; j < (size.h & ~1); j += 2) {
+            const uint8_t* psrc = data + (size.w * j * 4);
+            uint8_t* pdest = data + ((size.w >> 1) * (j >> 1) * 4);
+            for (int i = 0; i < (size.w >> 1); ++i, psrc += 8, pdest += 4) {
+                pdest[0] =
+                    (((int)psrc[0]) + psrc[4] + psrc[size.w * 4 + 0] + psrc[size.w * 4 + 4]) >>
+                    2;
+                pdest[1] =
+                    (((int)psrc[1]) + psrc[5] + psrc[size.w * 4 + 1] + psrc[size.w * 4 + 5]) >>
+                    2;
+                pdest[2] =
+                    (((int)psrc[2]) + psrc[6] + psrc[size.w * 4 + 2] + psrc[size.w * 4 + 6]) >>
+                    2;
+                pdest[3] =
+                    (((int)psrc[3]) + psrc[7] + psrc[size.w * 4 + 3] + psrc[size.w * 4 + 7]) >>
+                    2;
             }
-            size.w >>= 1;
-            size.h >>= 1;
         }
+        size.w >>= 1;
+        size.h >>= 1;
     }
 }
 
@@ -90,34 +73,34 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
     static DirectX11* dx11 = nullptr;
 
     switch (msg) {
-    case (WM_NCCREATE) : {
-        CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lp);
-        if (createStruct->lpCreateParams) {
-            dx11 = reinterpret_cast<DirectX11*>(createStruct->lpCreateParams);
-            dx11->Window = arg_hwnd;
+        case (WM_NCCREATE): {
+            CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lp);
+            if (createStruct->lpCreateParams) {
+                dx11 = reinterpret_cast<DirectX11*>(createStruct->lpCreateParams);
+                dx11->Window = arg_hwnd;
+            }
+            break;
         }
-        break;
-    }
-    case WM_KEYDOWN:
-        dx11->Key[(unsigned)wp] = true;
-        break;
-    case WM_KEYUP:
-        dx11->Key[(unsigned)wp] = false;
-        break;
-    case WM_SETFOCUS:
-        SetCapture(dx11->Window);
-        ShowCursor(FALSE);
-        break;
-    case WM_KILLFOCUS:
-        ReleaseCapture();
-        ShowCursor(TRUE);
-        break;
+        case WM_KEYDOWN:
+            dx11->Key[(unsigned)wp] = true;
+            break;
+        case WM_KEYUP:
+            dx11->Key[(unsigned)wp] = false;
+            break;
+        case WM_SETFOCUS:
+            SetCapture(dx11->Window);
+            ShowCursor(FALSE);
+            break;
+        case WM_KILLFOCUS:
+            ReleaseCapture();
+            ShowCursor(TRUE);
+            break;
     }
     return DefWindowProc(arg_hwnd, msg, wp, lp);
 }
 
 DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
-    fill(begin(Key), end(Key), false); 
+    fill(begin(Key), end(Key), false);
 
     Window = [this, vp] {
         const auto className = L"OVRAppWindow";
@@ -128,11 +111,11 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
 
         const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
         const auto sizeDivisor = 2;
-        RECT winSize = { 0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor };
+        RECT winSize = {0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, vp.x, vp.y,
-            winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
-            nullptr, hinst, this);
+                             winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
+                             nullptr, hinst, this);
     }();
 
     [this, vp] {
@@ -174,18 +157,20 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
     ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
 
-    UniformBufferGen = std::make_unique<DataBuffer>(Device, D3D11_BIND_CONSTANT_BUFFER, nullptr,
-        2000);  // make sure big enough
+    {
+        CD3D11_BUFFER_DESC desc(2000, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+        ThrowOnFailure(Device->CreateBuffer(&desc, nullptr, &UniformBufferGen));
+    }
 
     [this] {
-        CD3D11_RASTERIZER_DESC rs{ D3D11_DEFAULT };
+        CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
         ID3D11RasterizerStatePtr Rasterizer;
         ThrowOnFailure(Device->CreateRasterizerState(&rs, &Rasterizer));
         Context->RSSetState(Rasterizer);
     }();
 
     [this] {
-        CD3D11_DEPTH_STENCIL_DESC dss{ D3D11_DEFAULT };
+        CD3D11_DEPTH_STENCIL_DESC dss{D3D11_DEFAULT};
         ID3D11DepthStencilStatePtr DepthState;
         ThrowOnFailure(Device->CreateDepthStencilState(&dss, &DepthState));
         Context->OMSetDepthStencilState(DepthState, 0);
@@ -216,18 +201,21 @@ void DirectX11::ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
     Context->RSSetViewports(1, &d3dvp);
 }
 
-void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
+void DirectX11::Render(ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* indices, UINT stride,
                        int count) {
     Context->IASetInputLayout(fill->InputLayout);
-    Context->IASetIndexBuffer(indices->D3DBuffer, DXGI_FORMAT_R16_UINT, 0);
+    Context->IASetIndexBuffer(indices, DXGI_FORMAT_R16_UINT, 0);
 
     UINT offset = 0;
-    ID3D11Buffer* vertexBuffers[] = {vertices->D3DBuffer};
+    ID3D11Buffer* vertexBuffers[] = {vertices};
     Context->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
 
-    UniformBufferGen->Refresh(Context, fill->VShader->UniformData.data(),
-                              fill->VShader->UniformData.size());
-    ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen->D3DBuffer};
+    D3D11_MAPPED_SUBRESOURCE map;
+    Context->Map(UniformBufferGen, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
+    memcpy(map.pData, fill->VShader->UniformData.data(), fill->VShader->UniformData.size());
+    Context->Unmap(UniformBufferGen, 0);
+
+    ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen};
     Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
     Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -255,24 +243,14 @@ void DirectX11::HandleMessages() {
     }
 }
 
-ShaderFill::ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDesc,
-                       int numVertexDesc, const char* vertexShader, const char* pixelShader,
-                       std::unique_ptr<ImageBuffer>&& t, bool wrap)
-    : OneTexture(std::move(t)) {
-    ID3D10BlobPtr blobData;
-    ThrowOnFailure(D3DCompile(vertexShader, strlen(vertexShader), NULL, NULL, NULL, "main", "vs_4_0", 0, 0,
-               &blobData, NULL));
-    VShader = std::make_unique<Shader>(device, blobData, 0);
-    device->CreateInputLayout(VertexDesc, numVertexDesc, blobData->GetBufferPointer(),
-                              blobData->GetBufferSize(), &InputLayout);
-
-    ThrowOnFailure(D3DCompile(pixelShader, strlen(pixelShader), NULL, NULL, NULL, "main", "ps_4_0", 0, 0,
-               &blobData, NULL));
-    PShader = std::make_unique<Shader>(device, blobData, 1);
-
+ShaderFill::ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader,
+                       ID3D11InputLayout* inputLayout, std::unique_ptr<ImageBuffer>&& t)
+    : VShader(vertexShader),
+      PShader(pixelShader),
+      InputLayout(inputLayout),
+      OneTexture(std::move(t)) {
     CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
-    ss.AddressU = ss.AddressV = ss.AddressW =
-        wrap ? D3D11_TEXTURE_ADDRESS_WRAP : D3D11_TEXTURE_ADDRESS_BORDER;
+    ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     ss.Filter = D3D11_FILTER_ANISOTROPIC;
     ss.MaxAnisotropy = 8;
     device->CreateSamplerState(&ss, &SamplerState);
@@ -280,9 +258,11 @@ ShaderFill::ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDes
 
 Shader::Shader(ID3D11Device* device, ID3D10Blob* s, int which_type) {
     if (which_type == 0)
-        ThrowOnFailure(device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert));
+        ThrowOnFailure(
+            device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert));
     else
-        ThrowOnFailure(device->CreatePixelShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DPix));
+        ThrowOnFailure(
+            device->CreatePixelShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DPix));
 
     ID3D11ShaderReflectionPtr ref;
     D3DReflect(s->GetBufferPointer(), s->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&ref);
@@ -313,14 +293,26 @@ void Shader::SetUniform(const char* name, int n, const float* v) {
 }
 
 void Model::AllocateBuffers(ID3D11Device* device) {
-    VertexBuffer = std::make_unique<DataBuffer>(device, D3D11_BIND_VERTEX_BUFFER, &Vertices[0],
-                                                Vertices.size() * sizeof(Vertex));
-    IndexBuffer =
-        std::make_unique<DataBuffer>(device, D3D11_BIND_INDEX_BUFFER, &Indices[0], Indices.size() * 2);
+    D3D11_SUBRESOURCE_DATA sr{};
+
+    const CD3D11_BUFFER_DESC vbdesc(Vertices.size() * sizeof(Vertices[0]), D3D11_BIND_VERTEX_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+    sr.pSysMem = Vertices.data();
+    ThrowOnFailure(device->CreateBuffer(&vbdesc, &sr, &VertexBuffer));
+
+    const CD3D11_BUFFER_DESC ibdesc(Indices.size() * sizeof(Indices[0]), D3D11_BIND_INDEX_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+    sr.pSysMem = Indices.data();
+    ThrowOnFailure(device->CreateBuffer(&ibdesc, &sr, &IndexBuffer));
 }
 
 void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2, Color c) {
-    Vector3f Vert[][2] = {
+    const uint16_t CubeIndices[] = {0,  1,  3,  3,  1,  2,  5,  4,  6,  6,  4,  7,
+                                    8,  9,  11, 11, 9,  10, 13, 12, 14, 14, 12, 15,
+                                    16, 17, 19, 19, 17, 18, 21, 20, 22, 22, 20, 23};
+
+    const uint16_t offset = static_cast<uint16_t>(Vertices.size());
+    for (const auto& index : CubeIndices) Indices.push_back(index + offset);
+
+    const Vector3f Vert[][2] = {
         Vector3f(x1, y2, z1), Vector3f(z1, x1), Vector3f(x2, y2, z1), Vector3f(z1, x2),
         Vector3f(x2, y2, z2), Vector3f(z2, x2), Vector3f(x1, y2, z2), Vector3f(z2, x1),
         Vector3f(x1, y1, z1), Vector3f(z1, x1), Vector3f(x2, y1, z1), Vector3f(z1, x2),
@@ -335,34 +327,24 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
         Vector3f(x2, y2, z2), Vector3f(x2, y2), Vector3f(x1, y2, z2), Vector3f(x1, y2),
     };
 
-    uint16_t CubeIndices[] = {0,  1,  3,  3,  1,  2,  5,  4,  6,  6,  4,  7,
-                              8,  9,  11, 11, 9,  10, 13, 12, 14, 14, 12, 15,
-                              16, 17, 19, 19, 17, 18, 21, 20, 22, 22, 20, 23};
-
-    for (int i = 0; i < 36; i++) Indices.push_back(CubeIndices[i] + (uint16_t)Vertices.size());
-
     for (int v = 0; v < 24; v++) {
         Vertex vvv;
         vvv.Pos = Vert[v][0];
         vvv.U = Vert[v][1].x;
         vvv.V = Vert[v][1].y;
-        float dist1 = (vvv.Pos - Vector3f(-2, 4, -2)).Length();
-        float dist2 = (vvv.Pos - Vector3f(3, 4, -3)).Length();
-        float dist3 = (vvv.Pos - Vector3f(-4, 3, 25)).Length();
-        int bri = rand() % 160;
-        float RRR = c.R * (bri + 192.0f * (0.65f + 8 / dist1 + 1 / dist2 + 4 / dist3)) / 255.0f;
-        float GGG = c.G * (bri + 192.0f * (0.65f + 8 / dist1 + 1 / dist2 + 4 / dist3)) / 255.0f;
-        float BBB = c.B * (bri + 192.0f * (0.65f + 8 / dist1 + 1 / dist2 + 4 / dist3)) / 255.0f;
-        vvv.C.R = RRR > 255 ? 255 : (unsigned char)RRR;
-        vvv.C.G = GGG > 255 ? 255 : (unsigned char)GGG;
-        vvv.C.B = BBB > 255 ? 255 : (unsigned char)BBB;
+        const float dist1 = (vvv.Pos - Vector3f(-2, 4, -2)).Length();
+        const float dist2 = (vvv.Pos - Vector3f(3, 4, -3)).Length();
+        const float dist3 = (vvv.Pos - Vector3f(-4, 3, 25)).Length();
+        const int bri = rand() % 160;
+        const float mod = (bri + 192.0f * (0.65f + 8 / dist1 + 1 / dist2 + 4 / dist3)) / 255.0f;
+        vvv.C.R = static_cast<unsigned char>(min(c.R * mod, 255.0f));
+        vvv.C.G = static_cast<unsigned char>(min(c.G * mod, 255.0f));
+        vvv.C.B = static_cast<unsigned char>(min(c.B * mod, 255.0f));
         Vertices.push_back(vvv);
     }
 }
 
-// Simple latency box (keep similar vertex format and shader params same, for ease of code)
-Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reducedVersion)
-    : num_models(0) {
+Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
     D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
         {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
          D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -381,16 +363,25 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
             oPosition = mul(Proj, mul(View, Position)); 
             oTexCoord = TexCoord; 
             oColor = Color; 
-        }
-    )";
+        })";
     const char* PixelShaderSrc = R"(
         Texture2D Texture : register(t0);
         SamplerState Linear : register(s0); 
         float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0) : SV_Target
         {
             return Color * Texture.Sample(Linear, TexCoord);
-        };
-    )";
+        })";
+
+    ID3D10BlobPtr blobData;
+    ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), NULL, NULL, NULL, "main",
+                              "vs_4_0", 0, 0, &blobData, NULL));
+    VShader = std::make_unique<Shader>(device, blobData, 0);
+    device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
+                              blobData->GetBufferSize(), &InputLayout);
+
+    ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), NULL, NULL, NULL, "main",
+                              "ps_4_0", 0, 0, &blobData, NULL));
+    PShader = std::make_unique<Shader>(device, blobData, 1);
 
     // Construct textures
     const auto texWidthHeight = 256;
@@ -422,15 +413,15 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
         std::unique_ptr<ImageBuffer> t = std::make_unique<ImageBuffer>(
             device, deviceContext, Sizei(texWidthHeight, texWidthHeight),
             (unsigned char*)tex_pixels[k]);
-        generated_texture[k] = std::make_unique<ShaderFill>(
-            device, ModelVertexDesc, 3, VertexShaderSrc, PixelShaderSrc, std::move(t));
+        generated_texture[k] = std::make_unique<ShaderFill>(device, VShader.get(), PShader.get(),
+                                                            InputLayout, std::move(t));
     }
 
     // Construct geometry
     Model* m = new Model(Vector3f(0, 0, 0), std::move(generated_texture[2]));  // Moving box
     m->AddSolidColorBox(0, 0, 0, +1.0f, +1.0f, 1.0f, Model::Color(64, 64, 64));
     m->AllocateBuffers(device);
-    Add(m);
+    Models.emplace_back(m);
 
     m = new Model(Vector3f(0, 0, 0), std::move(generated_texture[1]));  // Walls
     m->AddSolidColorBox(-10.1f, 0.0f, -20.0f, -10.0f, 4.0f, 20.0f,
@@ -440,7 +431,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
     m->AddSolidColorBox(10.0f, -0.1f, -20.0f, 10.1f, 4.0f, 20.0f,
                         Model::Color(128, 128, 128));  // Right Wall
     m->AllocateBuffers(device);
-    Add(m);
+    Models.emplace_back(m);
 
     m = new Model(Vector3f(0, 0, 0), std::move(generated_texture[0]));  // Floors
     m->AddSolidColorBox(-10.0f, -0.1f, -20.0f, 10.0f, 0.0f, 20.1f,
@@ -448,14 +439,12 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
     m->AddSolidColorBox(-15.0f, -6.1f, 18.0f, 15.0f, -6.0f, 30.0f,
                         Model::Color(128, 128, 128));  // Bottom floor
     m->AllocateBuffers(device);
-    Add(m);
-
-    if (reducedVersion) return;
+    Models.emplace_back(m);
 
     m = new Model(Vector3f(0, 0, 0), std::move(generated_texture[4]));  // Ceiling
     m->AddSolidColorBox(-10.0f, 4.0f, -20.0f, 10.0f, 4.1f, 20.1f, Model::Color(128, 128, 128));
     m->AllocateBuffers(device);
-    Add(m);
+    Models.emplace_back(m);
 
     m = new Model(Vector3f(0, 0, 0), std::move(generated_texture[3]));  // Fixtures & furniture
     m->AddSolidColorBox(9.5f, 0.75f, 3.0f, 10.1f, 2.5f, 3.1f,
@@ -502,46 +491,18 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
         m->AddSolidColorBox(-3, 0.0f, f, -2.9f, 1.3f, f + 0.1f, Model::Color(64, 64, 64));  // Posts
 
     m->AllocateBuffers(device);
-    Add(m);
-}
-
-// Simple latency box (keep similar vertex format and shader params same, for ease of code)
-Scene::Scene(ID3D11Device* device, int renderTargetWidth, int renderTargetHeight) : num_models(0) {
-    D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
-        {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
-         D3D11_INPUT_PER_VERTEX_DATA, 0},
-    };
-
-    char* VertexShaderSrc =
-        "float4x4 Proj, View;"
-        "float4 NewCol;"
-        "void main(in float4 Position : POSITION, out float4 oPosition : SV_Position, out "
-        "float4 oColor: COLOR0)"
-        "{   oPosition = mul(Proj, Position); oColor = NewCol; }";
-    char* PixelShaderSrc =
-        "float4 main(in float4 Position : SV_Position, in float4 Color: COLOR0) : SV_Target"
-        "{   return Color ; }";
-
-    Model* m = new Model(Vector3f(0, 0, 0),
-                         std::make_unique<ShaderFill>(device, ModelVertexDesc, 3, VertexShaderSrc,
-                                                      PixelShaderSrc, nullptr));
-    float scale = 0.04f;
-    float extra_y = ((float)renderTargetWidth / (float)renderTargetHeight);
-    m->AddSolidColorBox(1 - scale, 1 - (scale * extra_y), -1, 1 + scale, 1 + (scale * extra_y), -1,
-                        Model::Color(0, 128, 0));
-    m->AllocateBuffers(device);
-    Add(m);
+    Models.emplace_back(m);
 }
 
 void Scene::Render(DirectX11& dx11, Matrix4f view, Matrix4f proj) {
-    for (int i = 0; i < num_models; i++) {
-        Matrix4f modelmat = Models[i]->GetMatrix();
+    for (auto& model : Models) {
+        Matrix4f modelmat = model->GetMatrix();
         Matrix4f mat = (view * modelmat).Transposed();
 
-        Models[i]->Fill->VShader->SetUniform("View", 16, (float*)&mat);
-        Models[i]->Fill->VShader->SetUniform("Proj", 16, (float*)&proj);
+        model->Fill->VShader->SetUniform("View", 16, (float*)&mat);
+        model->Fill->VShader->SetUniform("Proj", 16, (float*)&proj);
 
-        dx11.Render(Models[i]->Fill.get(), Models[i]->VertexBuffer.get(),
-                    Models[i]->IndexBuffer.get(), sizeof(Model::Vertex), Models[i]->Indices.size());
+        dx11.Render(model->Fill.get(), model->VertexBuffer, model->IndexBuffer,
+                    sizeof(Model::Vertex), model->Indices.size());
     }
 }

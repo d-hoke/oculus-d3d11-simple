@@ -75,14 +75,6 @@ struct ImageBuffer {
     ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
 };
 
-struct DataBuffer {
-    ID3D11BufferPtr D3DBuffer;
-
-    DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* buffer, size_t size);
-
-    void Refresh(ID3D11DeviceContext* deviceContext, const void* buffer, size_t size);
-};
-
 struct DirectX11 {
     HINSTANCE hinst = nullptr;
     HWND Window = nullptr;
@@ -91,13 +83,13 @@ struct DirectX11 {
     ID3D11DeviceContextPtr Context;
     IDXGISwapChainPtr SwapChain;
     ID3D11RenderTargetViewPtr BackBufferRT;
-    std::unique_ptr<DataBuffer> UniformBufferGen;
+    ID3D11BufferPtr UniformBufferGen;
 
     DirectX11(HINSTANCE hinst, Recti vp);
     ~DirectX11();
-    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, ID3D11DepthStencilView* depthbuffer,
-                                 Recti vp);
-    void Render(struct ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
+    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
+                                 ID3D11DepthStencilView* depthbuffer, Recti vp);
+    void Render(struct ShaderFill* fill, ID3D11Buffer* vertices, ID3D11Buffer* indices, UINT stride,
                 int count);
     bool IsAnyKeyPressed() const;
     void HandleMessages();
@@ -122,15 +114,14 @@ struct Shader {
 };
 
 struct ShaderFill {
-    std::unique_ptr<Shader> VShader;
-    std::unique_ptr<Shader> PShader;
+    Shader* VShader;
+    Shader* PShader;
+    ID3D11InputLayout* InputLayout;
+
     std::unique_ptr<ImageBuffer> OneTexture;
-    ID3D11InputLayoutPtr InputLayout;
     ID3D11SamplerStatePtr SamplerState;
 
-    ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDesc, int numVertexDesc,
-               const char* vertexShader, const char* pixelShader, std::unique_ptr<ImageBuffer>&& t,
-               bool wrap = 1);
+    ShaderFill(ID3D11Device* device, Shader* vertexShader, Shader* pixelShader, ID3D11InputLayout* inputLayout, std::unique_ptr<ImageBuffer>&& t);
 };
 
 struct Model {
@@ -152,34 +143,31 @@ struct Model {
     std::vector<Vertex> Vertices;
     std::vector<uint16_t> Indices;
     std::unique_ptr<ShaderFill> Fill;
-    std::unique_ptr<DataBuffer> VertexBuffer;
-    std::unique_ptr<DataBuffer> IndexBuffer;
+    ID3D11BufferPtr VertexBuffer;
+    ID3D11BufferPtr IndexBuffer;
 
     Model(Vector3f arg_pos, std::unique_ptr<ShaderFill>&& arg_Fill) {
         Pos = arg_pos;
         Fill = std::move(arg_Fill);
     }
+
     Matrix4f& GetMatrix() {
         Mat = Matrix4f(Rot);
         Mat = Matrix4f::Translation(Pos) * Mat;
         return Mat;
     }
-
     void AllocateBuffers(ID3D11Device* device);
-
     void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2,
-        Color c);
+                                 Color c);
 };
-//-------------------------------------------------------------------------
+
 struct Scene {
-    int num_models;
-    std::unique_ptr<Model> Models[10];
+    std::unique_ptr<Shader> VShader;
+    std::unique_ptr<Shader> PShader;
+    ID3D11InputLayoutPtr InputLayout;
+    std::vector<std::unique_ptr<Model>> Models;
 
-    void Add(Model* n) { Models[num_models++].reset(n); }
-
-    Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reducedVersion);
-
-    Scene(ID3D11Device* device, int renderTargetWidth, int renderTargetHeight);
+    Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext);
 
     void Render(DirectX11& dx11, Matrix4f view, Matrix4f proj);
 };

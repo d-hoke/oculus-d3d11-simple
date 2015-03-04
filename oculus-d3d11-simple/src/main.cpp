@@ -79,8 +79,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
 
     {
         // Create the room model
-        Scene roomScene(DX11.Device, DX11.Context,
-                        false);  // Can simplify scene further with parameter if required.
+        Scene roomScene(DX11.Device, DX11.Context);
 
         float Yaw(3.141592f);             // Horizontal rotation of the player
         Vector3f Pos(0.0f, 1.6f, -5.0f);  // Position of player
