@@ -27,143 +27,184 @@ limitations under the License.
 // 'W','A','S','D' and arrow keys to navigate.
 
 #include "Win32_DX11AppUtil.h"  // Include Non-SDK supporting utilities
-#include "OVR_CAPI.h"           // Include the OculusVR SDK
+#include <OVR_CAPI.h>           // Include the OculusVR SDK
 
 #define OVR_D3D_VERSION 11
-#include "OVR_CAPI_D3D.h"  // Include SDK-rendered code for the D3D version
-
-#include "libovrwrapper.h"
+#include <OVR_CAPI_D3D.h>  // Include SDK-rendered code for the D3D version
 
 #include <algorithm>
-#include <cassert>
-#include <regex>
-#include <string>
+#include <array>
+#include <stdexcept>
 
-using namespace libovrwrapper;
+void throwOnError(ovrBool res, ovrHmd hmd = nullptr) {
+    if (!res) {
+        auto errString = ovrHmd_GetLastError(hmd);
+#ifdef _DEBUG
+        OutputDebugStringA(errString);
+#endif
+        throw std::runtime_error{errString};
+    }
+}
 
 using namespace std;
 
+template <typename Func>
+struct scope_exit {
+    scope_exit(Func f) : onExit(f) {}
+    ~scope_exit() { onExit(); }
+
+private:
+    Func onExit;
+};
+
+template <typename Func>
+scope_exit<Func> on_scope_exit(Func f) {
+    return scope_exit<Func>{f};
+};
+
 //-------------------------------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
-    Ovr ovr;
-    Hmd hmd(ovr.CreateHmd());
+    // Initialize the OVR SDK
+    throwOnError(ovr_Initialize());
+    auto ovr = on_scope_exit([] { ovr_Shutdown(); });
 
-    Recti windowRect = Recti(hmd.getWindowsPos(), hmd.getResolution());
-    DirectX11 DX11(hinst, windowRect);
+    // Create the HMD
+    auto hmdCreate = [] {
+        auto hmd = ovrHmd_Create(0);
+        if (!hmd) {
+            MessageBoxA(NULL, "Oculus Rift not detected.\nAttempting to create debug HMD.", "",
+                        MB_OK);
 
-    hmd.attachToWindow(DX11.Window);
-    hmd.setCap(ovrHmdCap_LowPersistence);
-    hmd.setCap(ovrHmdCap_DynamicPrediction);
+            // If we didn't detect an Hmd, create a simulated one for debugging.
+            hmd = ovrHmd_CreateDebug(ovrHmd_DK2);
+            throwOnError(hmd != nullptr);
+        }
 
-    // Start the sensor which informs of the Rift's pose and motion
-    hmd.configureTracking(ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection |
-                          ovrTrackingCap_Position);
+        if (hmd->ProductName[0] == '\0')
+            MessageBoxA(NULL, "Rift detected, display not enabled.", "", MB_OK);
+        return hmd;
+    };
+    auto hmdDestroy = [](ovrHmd hmd) { ovrHmd_Destroy(hmd); };
+    unique_ptr<const ovrHmdDesc, decltype(hmdDestroy)> hmd{hmdCreate(), hmdDestroy};
 
-    // Make the eye render buffers (caution if actual size < requested due to HW limits).
-    EyeTarget eyeTargets[] = {{DX11.Device, hmd.getFovTextureSize(ovrEye_Left)},
-                               {DX11.Device, hmd.getFovTextureSize(ovrEye_Right)}};
+    // Create the Direct3D11 device and window
+    DirectX11 DX11(hinst, Recti(hmd->WindowsPos, hmd->Resolution));
 
-    // Setup VR components
-    ovrD3D11Config d3d11cfg;
-    d3d11cfg.D3D11.Header.API = ovrRenderAPI_D3D11;
-    d3d11cfg.D3D11.Header.BackBufferSize = hmd.getResolution();
-    d3d11cfg.D3D11.Header.Multisample = 1;
-    d3d11cfg.D3D11.pDevice = DX11.Device;
-    d3d11cfg.D3D11.pDeviceContext = DX11.Context;
-    d3d11cfg.D3D11.pBackBufferRT = DX11.BackBufferRT;
-    d3d11cfg.D3D11.pSwapChain = DX11.SwapChain;
+    // Attach HMD to window and initialize tracking
+    throwOnError(ovrHmd_AttachToWindow(hmd.get(), DX11.Window, nullptr, nullptr), hmd.get());
+    ovrHmd_SetEnabledCaps(hmd.get(), ovrHmdCap_LowPersistence | ovrHmdCap_DynamicPrediction);
+    throwOnError(ovrHmd_ConfigureTracking(hmd.get(), ovrTrackingCap_Orientation |
+                                                         ovrTrackingCap_MagYawCorrection |
+                                                         ovrTrackingCap_Position,
+                                          0),
+                 hmd.get());
 
-    auto EyeRenderDesc = hmd.configureRendering(
-        &d3d11cfg.Config, ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette |
-                              ovrDistortionCap_TimeWarp | ovrDistortionCap_Overdrive);
+    // Create the eye render targets.
+    EyeTarget eyeTargets[] = {
+        {DX11.Device,
+         ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Left, hmd->DefaultEyeFov[ovrEye_Left], 1.0f)},
+        {DX11.Device, ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Right,
+                                               hmd->DefaultEyeFov[ovrEye_Right], 1.0f)}};
 
-    {
-        // Create the room model
-        Scene roomScene(DX11.Device, DX11.Context);
+    // Configure SDK rendering
+    auto eyeRenderDesc = [&DX11, &hmd] {
+        ovrD3D11Config d3d11cfg;
+        d3d11cfg.D3D11.Header.API = ovrRenderAPI_D3D11;
+        d3d11cfg.D3D11.Header.BackBufferSize = hmd->Resolution;
+        d3d11cfg.D3D11.Header.Multisample = 1;
+        d3d11cfg.D3D11.pDevice = DX11.Device;
+        d3d11cfg.D3D11.pDeviceContext = DX11.Context;
+        d3d11cfg.D3D11.pBackBufferRT = DX11.BackBufferRT;
+        d3d11cfg.D3D11.pSwapChain = DX11.SwapChain;
 
-        float Yaw(3.141592f);             // Horizontal rotation of the player
-        Vector3f Pos(0.0f, 1.6f, -5.0f);  // Position of player
+        array<ovrEyeRenderDesc, 2> eyeRenderDesc;
+        throwOnError(
+            ovrHmd_ConfigureRendering(hmd.get(), &d3d11cfg.Config,
+            ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette |
+            ovrDistortionCap_TimeWarp | ovrDistortionCap_Overdrive,
+            hmd->DefaultEyeFov, &eyeRenderDesc[0]),
+            hmd.get());
+        return eyeRenderDesc;
+    }();
 
-        // MAIN LOOP
-        // =========
-        int appClock = 0;
+    // Create the room model
+    Scene roomScene(DX11.Device, DX11.Context);
 
-        while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
-            ++appClock;
+    float Yaw(3.141592f);             // Horizontal rotation of the player
+    Vector3f Pos(0.0f, 1.6f, -5.0f);  // Position of player
 
-            MSG msg;
-            if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
+    // MAIN LOOP
+    // =========
+    int appClock = 0;
 
-            const float speed = 1.0f;    // Can adjust the movement speed.
-            int timesToRenderScene = 1;  // Can adjust the render burden on the app.
-            ovrVector3f useHmdToEyeViewOffset[2] = {EyeRenderDesc[0].HmdToEyeViewOffset,
-                                                    EyeRenderDesc[1].HmdToEyeViewOffset};
+    while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
+        ++appClock;
 
-            hmd.beginFrame(0);
+        MSG msg;
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
 
-            // Handle key toggles for re-centering, meshes, FOV, etc.
-            // Recenter the Rift by pressing 'R'
-            if (DX11.Key['R']) hmd.recenterPose();
+        const float speed = 1.0f;  // Can adjust the movement speed.
+        ovrVector3f useHmdToEyeViewOffset[2] = {eyeRenderDesc[0].HmdToEyeViewOffset,
+                                                eyeRenderDesc[1].HmdToEyeViewOffset};
 
-            // Dismiss the Health and Safety message by pressing any key
-            if (DX11.IsAnyKeyPressed()) hmd.dismissHSWDisplay();
+        ovrHmd_BeginFrame(hmd.get(), 0);
 
-            // Keyboard inputs to adjust player orientation
-            if (DX11.Key[VK_LEFT]) Yaw += 0.02f;
-            if (DX11.Key[VK_RIGHT]) Yaw -= 0.02f;
+        // Recenter the Rift by pressing 'R'
+        if (DX11.Key['R']) ovrHmd_RecenterPose(hmd.get());
 
-            // Keyboard inputs to adjust player position
-            if (DX11.Key['W'] || DX11.Key[VK_UP])
-                Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, -speed * 0.05f));
-            if (DX11.Key['S'] || DX11.Key[VK_DOWN])
-                Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, +speed * 0.05f));
-            if (DX11.Key['D'])
-                Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(+speed * 0.05f, 0, 0));
-            if (DX11.Key['A'])
-                Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(-speed * 0.05f, 0, 0));
-            Pos.y = hmd.getProperty(OVR_KEY_EYE_HEIGHT, Pos.y);
+        // Dismiss the Health and Safety message by pressing any key
+        if (DX11.IsAnyKeyPressed()) ovrHmd_DismissHSWDisplay(hmd.get());
 
-            // Animate the cube
-            if (speed)
-                roomScene.Models[0]->Pos =
-                    Vector3f(9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock));
+        // Keyboard inputs to adjust player orientation
+        if (DX11.Key[VK_LEFT]) Yaw += 0.02f;
+        if (DX11.Key[VK_RIGHT]) Yaw -= 0.02f;
 
-            // Get both eye poses simultaneously, with IPD offset already included.
-            auto eyePoses = hmd.getEyePoses(0, useHmdToEyeViewOffset);
+        // Keyboard inputs to adjust player position
+        if (DX11.Key['W'] || DX11.Key[VK_UP])
+            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, -speed * 0.05f));
+        if (DX11.Key['S'] || DX11.Key[VK_DOWN])
+            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, +speed * 0.05f));
+        if (DX11.Key['D'])
+            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(+speed * 0.05f, 0, 0));
+        if (DX11.Key['A'])
+            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(-speed * 0.05f, 0, 0));
+        Pos.y = ovrHmd_GetFloat(hmd.get(), OVR_KEY_EYE_HEIGHT, Pos.y);
 
-            // Render the two undistorted eye views into their render buffers.
-            for (int eye = 0; eye < 2; eye++) {
-                EyeTarget& useTarget = eyeTargets[eye];
-                ovrPosef& useEyePose = eyePoses.first[eye];
-                bool clearEyeImage = true;
-                bool updateEyeImage = true;
+        // Animate the cube
+        roomScene.Models[0]->Pos =
+            Vector3f(9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock));
 
-                if (clearEyeImage)
-                    DX11.ClearAndSetEyeTarget(useTarget);
-                if (updateEyeImage) {
-                    // Get view and projection matrices (note near Z to reduce eye strain)
-                    Matrix4f rollPitchYaw = Matrix4f::RotationY(Yaw);
-                    Matrix4f finalRollPitchYaw = rollPitchYaw * Matrix4f(useEyePose.Orientation);
-                    Vector3f finalUp = finalRollPitchYaw.Transform(Vector3f(0, 1, 0));
-                    Vector3f finalForward = finalRollPitchYaw.Transform(Vector3f(0, 0, -1));
-                    Vector3f shiftedEyePos = Pos + rollPitchYaw.Transform(useEyePose.Position);
+        // Get both eye poses simultaneously, with IPD offset already included.
+        ovrPosef eyePoses[2] = {};
+        ovrHmd_GetEyePoses(hmd.get(), 0, useHmdToEyeViewOffset, eyePoses, nullptr);
 
-                    Matrix4f view =
-                        Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
-                    Matrix4f proj =
-                        ovrMatrix4f_Projection(EyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
+        // Render the two undistorted eye views into their render buffers.
+        for (int eye = 0; eye < 2; ++eye) {
+            EyeTarget& useTarget = eyeTargets[eye];
+            ovrPosef& useEyePose = eyePoses[eye];
 
-                    // Render the scene
-                    for (int t = 0; t < timesToRenderScene; t++)
-                        roomScene.Render(DX11, view, proj.Transposed());
-                }
-            }
+            DX11.ClearAndSetEyeTarget(useTarget);
+            // Get view and projection matrices (note near Z to reduce eye strain)
+            Matrix4f rollPitchYaw = Matrix4f::RotationY(Yaw);
+            Matrix4f finalRollPitchYaw = rollPitchYaw * Matrix4f(useEyePose.Orientation);
+            Vector3f finalUp = finalRollPitchYaw.Transform(Vector3f(0, 1, 0));
+            Vector3f finalForward = finalRollPitchYaw.Transform(Vector3f(0, 0, -1));
+            Vector3f shiftedEyePos = Pos + rollPitchYaw.Transform(useEyePose.Position);
 
-            // Do distortion rendering, Present and flush/sync
-            ovrD3D11Texture eyeTexture[2];  // Gather data for eye textures
+            Matrix4f view =
+                Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
+            Matrix4f proj = ovrMatrix4f_Projection(eyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
+
+            // Render the scene
+            roomScene.Render(DX11, view, proj.Transposed());
+        }
+
+        // Do distortion rendering, Present and flush/sync
+        [&eyeTargets, &eyePoses, &hmd] {
+            ovrD3D11Texture eyeTexture[2];
             for (int eye = 0; eye < 2; eye++) {
                 eyeTexture[eye].D3D11.Header.API = ovrRenderAPI_D3D11;
                 eyeTexture[eye].D3D11.Header.TextureSize = eyeTargets[eye].size;
@@ -171,10 +212,9 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
                 eyeTexture[eye].D3D11.pTexture = eyeTargets[eye].tex;
                 eyeTexture[eye].D3D11.pSRView = eyeTargets[eye].srv;
             }
-            hmd.endFrame(eyePoses.first.data(), &eyeTexture[0].Texture);
-        }
+            ovrHmd_EndFrame(hmd.get(), eyePoses, &eyeTexture[0].Texture);
+        }();
     }
 
-    hmd.shutdownRendering();
     return 0;
 }
