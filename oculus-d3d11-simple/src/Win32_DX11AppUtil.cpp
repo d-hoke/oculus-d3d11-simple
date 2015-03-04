@@ -92,13 +92,12 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         IDXGIAdapterPtr Adapter;
         ThrowOnFailure(DXGIFactory->EnumAdapters(0, &Adapter));
 
-        const UINT creationFlags = [] {
+        const UINT creationFlags =
 #ifdef _DEBUG
-            return D3D11_CREATE_DEVICE_DEBUG;
+            D3D11_CREATE_DEVICE_DEBUG;
 #else
-            return 0u;
+            0u;
 #endif
-        }();
 
         DXGI_SWAP_CHAIN_DESC scDesc{};
         scDesc.BufferCount = 2;
@@ -118,16 +117,18 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
             &Context));
     }();
 
-    ID3D11Texture2DPtr backBuffer;
-    ThrowOnFailure(
-        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
-    ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
+    [this] {
+        ID3D11Texture2DPtr backBuffer;
+        ThrowOnFailure(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D),
+                                            reinterpret_cast<void**>(&backBuffer)));
+        ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
+    }();
 
-    {
+    [this] {
         CD3D11_BUFFER_DESC desc(2000, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC,
                                 D3D11_CPU_ACCESS_WRITE);
         ThrowOnFailure(Device->CreateBuffer(&desc, nullptr, &UniformBufferGen));
-    }
+    }();
 
     [this] {
         CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
@@ -143,11 +144,58 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         Context->OMSetDepthStencilState(DepthState, 0);
     }();
 
-    CD3D11_SAMPLER_DESC ss{ D3D11_DEFAULT };
-    ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-    ss.Filter = D3D11_FILTER_ANISOTROPIC;
-    ss.MaxAnisotropy = 8;
-    Device->CreateSamplerState(&ss, &SamplerState);
+    [this] {
+        CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
+        ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+        ss.Filter = D3D11_FILTER_ANISOTROPIC;
+        ss.MaxAnisotropy = 8;
+        Device->CreateSamplerState(&ss, &SamplerState);
+    }();
+
+    [this] {
+        D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
+            {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
+             D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"Color", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, offsetof(Model::Vertex, C),
+             D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"TexCoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Model::Vertex, U),
+             D3D11_INPUT_PER_VERTEX_DATA, 0},
+        };
+
+        const char* VertexShaderSrc = R"(
+        float4x4 Proj, View;
+        float4 NewCol;
+        void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0,
+                  out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0)
+        {
+            oPosition = mul(Proj, mul(View, Position)); 
+            oTexCoord = TexCoord; 
+            oColor = Color; 
+        })";
+
+        ID3D10BlobPtr blobData;
+        ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), nullptr, nullptr,
+                                  nullptr, "main", "vs_4_0", 0, 0, &blobData, nullptr));
+        VShader = std::make_unique<VertexShader>(Device, blobData);
+        Device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
+                                  blobData->GetBufferSize(), &InputLayout);
+    }();
+
+    [this] {
+        const char* PixelShaderSrc = R"(
+        Texture2D Texture : register(t0);
+        SamplerState Linear : register(s0); 
+        float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0) : SV_Target
+        {
+            return Color * Texture.Sample(Linear, TexCoord);
+        })";
+
+        ID3D10BlobPtr blobData;
+        ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), nullptr, nullptr, nullptr,
+                                  "main", "ps_4_0", 0, 0, &blobData, nullptr));
+        ThrowOnFailure(Device->CreatePixelShader(blobData->GetBufferPointer(),
+                                                 blobData->GetBufferSize(), nullptr, &PShader));
+    }();
 }
 
 DirectX11::~DirectX11() {
@@ -160,7 +208,7 @@ DirectX11::~DirectX11() {
 
 void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     const float black[] = {0.f, 0.f, 0.f, 1.f};
-    ID3D11RenderTargetView* rtvs[] = { eyeTarget.rtv };
+    ID3D11RenderTargetView* rtvs[] = {eyeTarget.rtv};
     Context->OMSetRenderTargets(1, rtvs, eyeTarget.dsv);
     Context->ClearRenderTargetView(eyeTarget.rtv, black);
     Context->ClearDepthStencilView(eyeTarget.dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
@@ -174,10 +222,9 @@ void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     Context->RSSetViewports(1, &d3dvp);
 }
 
-void DirectX11::Render(VertexShader* vertexShader, ID3D11PixelShader* pixelShader,
-                       ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
+void DirectX11::Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
                        ID3D11Buffer* indices, UINT stride, int count) {
-    Context->IASetInputLayout(inputLayout);
+    Context->IASetInputLayout(InputLayout);
     Context->IASetIndexBuffer(indices, DXGI_FORMAT_R16_UINT, 0);
 
     UINT offset = 0;
@@ -186,16 +233,16 @@ void DirectX11::Render(VertexShader* vertexShader, ID3D11PixelShader* pixelShade
 
     D3D11_MAPPED_SUBRESOURCE map;
     Context->Map(UniformBufferGen, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
-    memcpy(map.pData, vertexShader->UniformData.data(), vertexShader->UniformData.size());
+    memcpy(map.pData, VShader->UniformData.data(), VShader->UniformData.size());
     Context->Unmap(UniformBufferGen, 0);
 
     ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen};
     Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
     Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    Context->VSSetShader(vertexShader->D3DVert, nullptr, 0);
-    Context->PSSetShader(pixelShader, nullptr, 0);
-    ID3D11SamplerState* samplerStates[] = { SamplerState };
+    Context->VSSetShader(VShader->D3DVert, nullptr, 0);
+    Context->PSSetShader(PShader, nullptr, 0);
+    ID3D11SamplerState* samplerStates[] = {SamplerState};
     Context->PSSetSamplers(0, 1, samplerStates);
 
     if (texSrv) {
@@ -288,74 +335,31 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
 }
 
 Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
-    D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
-        {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
-         D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"Color", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, offsetof(Model::Vertex, C),
-         D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"TexCoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Model::Vertex, U),
-         D3D11_INPUT_PER_VERTEX_DATA, 0},
-    };
-
-    ID3D10BlobPtr blobData;
-    const char* VertexShaderSrc = R"(
-        float4x4 Proj, View;
-        float4 NewCol;
-        void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0,
-                  out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0)
-        {
-            oPosition = mul(Proj, mul(View, Position)); 
-            oTexCoord = TexCoord; 
-            oColor = Color; 
-        })";
-
-    ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), nullptr, nullptr, nullptr,
-                              "main", "vs_4_0", 0, 0, &blobData, nullptr));
-    VShader = std::make_unique<VertexShader>(device, blobData);
-    device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
-                              blobData->GetBufferSize(), &InputLayout);
-
-    const char* PixelShaderSrc = R"(
-        Texture2D Texture : register(t0);
-        SamplerState Linear : register(s0); 
-        float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0) : SV_Target
-        {
-            return Color * Texture.Sample(Linear, TexCoord);
-        })";
-
-    ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), nullptr, nullptr, nullptr,
-                              "main", "ps_4_0", 0, 0, &blobData, nullptr));
-    [device, blobData, this] {
-        ThrowOnFailure(device->CreatePixelShader(blobData->GetBufferPointer(),
-                                                 blobData->GetBufferSize(), nullptr, &PShader));
-    }();
-
     // Construct textures
     const auto texWidthHeight = 256;
     const auto texCount = 5;
-    static Model::Color tex_pixels[texCount][texWidthHeight * texWidthHeight];
     ID3D11ShaderResourceViewPtr generated_texture[texCount];
 
     for (int k = 0; k < texCount; ++k) {
+        vector<Model::Color> tex_pixels(texWidthHeight * texWidthHeight);
         for (int j = 0; j < texWidthHeight; ++j)
             for (int i = 0; i < texWidthHeight; ++i) {
                 if (k == 0)
-                    tex_pixels[0][j * texWidthHeight + i] =
+                    tex_pixels[j * texWidthHeight + i] =
                         (((i >> 7) ^ (j >> 7)) & 1) ? Model::Color(180, 180, 180, 255)
                                                     : Model::Color(80, 80, 80, 255);  // floor
                 if (k == 1)
-                    tex_pixels[1][j * texWidthHeight + i] =
+                    tex_pixels[j * texWidthHeight + i] =
                         (((j / 4 & 15) == 0) ||
                          (((i / 4 & 15) == 0) && ((((i / 4 & 31) == 0) ^ ((j / 4 >> 4) & 1)) == 0)))
                             ? Model::Color(60, 60, 60, 255)
                             : Model::Color(180, 180, 180, 255);  // wall
                 if (k == 2 || k == 4)
-                    tex_pixels[k][j * texWidthHeight + i] =
+                    tex_pixels[j * texWidthHeight + i] =
                         (i / 4 == 0 || j / 4 == 0) ? Model::Color(80, 80, 80, 255)
                                                    : Model::Color(180, 180, 180, 255);  // ceiling
                 if (k == 3)
-                    tex_pixels[3][j * texWidthHeight + i] =
-                        Model::Color(128, 128, 128, 255);  // blank
+                    tex_pixels[j * texWidthHeight + i] = Model::Color(128, 128, 128, 255);  // blank
             }
 
         generated_texture[k] = [device, deviceContext, texWidthHeight](unsigned char* data) {
@@ -388,7 +392,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
                 wh >>= 1;
             }
             return texSrv;
-        }(&tex_pixels[k][0].R);
+        }(&tex_pixels[0].R);
     }
 
     // Construct geometry
@@ -470,13 +474,12 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
 
 void Scene::Render(DirectX11& dx11, Matrix4f view, Matrix4f proj) {
     for (auto& model : Models) {
-        Matrix4f modelmat = model->GetMatrix();
-        Matrix4f mat = (view * modelmat).Transposed();
+        Matrix4f modelView = (view * model->GetMatrix()).Transposed();
 
-        VShader->SetUniform("View", 16, (float*)&mat);
-        VShader->SetUniform("Proj", 16, (float*)&proj);
+        dx11.VShader->SetUniform("View", 16, &modelView.M[0][0]);
+        dx11.VShader->SetUniform("Proj", 16, &proj.M[0][0]);
 
-        dx11.Render(VShader.get(), PShader, InputLayout, model->textureSrv, model->VertexBuffer, model->IndexBuffer,
+        dx11.Render(model->textureSrv, model->VertexBuffer, model->IndexBuffer,
                     sizeof(Model::Vertex), model->Indices.size());
     }
 }

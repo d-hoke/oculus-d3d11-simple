@@ -88,12 +88,14 @@ struct DirectX11 {
     ID3D11RenderTargetViewPtr BackBufferRT;
     ID3D11BufferPtr UniformBufferGen;
     ID3D11SamplerStatePtr SamplerState;
+    std::unique_ptr<VertexShader> VShader;
+    ID3D11PixelShaderPtr PShader;
+    ID3D11InputLayoutPtr InputLayout;
 
     DirectX11(HINSTANCE hinst, Recti vp);
     ~DirectX11();
     void ClearAndSetEyeTarget(const EyeTarget& eyeTarget);
-    void Render(VertexShader* vertexShader, ID3D11PixelShader* pixelShader,
-                ID3D11InputLayout* inputLayout, ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
+    void Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
                 ID3D11Buffer* indices, UINT stride, int count);
     bool IsAnyKeyPressed() const;
 };
@@ -128,9 +130,6 @@ struct Model {
 };
 
 struct Scene {
-    std::unique_ptr<VertexShader> VShader;
-    ID3D11PixelShaderPtr PShader;
-    ID3D11InputLayoutPtr InputLayout;
     std::vector<std::unique_ptr<Model>> Models;
 
     Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext);
