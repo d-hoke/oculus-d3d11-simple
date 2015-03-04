@@ -17,6 +17,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 *************************************************************************************/
 
+#include <OVR_CAPI.h>
+
 #include <cstring>
 #include <memory>
 #include <string>
@@ -54,54 +56,23 @@ _COM_SMARTPTR_TYPEDEF(ID3D10Blob, __uuidof(ID3D10Blob));
 
 using namespace OVR;
 
-// Helper sets a D3D resource name string (used by PIX and debug layer leak reporting).
-template <typename T>
-inline void SetDebugObjectName(T resource, const char* name, size_t nameLen) {
-    ID3D11DeviceChildPtr deviceChild;
-    resource->QueryInterface(__uuidof(ID3D11DeviceChild), reinterpret_cast<void**>(&deviceChild));
-#if !defined(NO_D3D11_DEBUG_NAME) && (defined(_DEBUG) || defined(PROFILE))
-    if (deviceChild) deviceChild->SetPrivateData(WKPDID_D3DDebugObjectName, nameLen, name);
-#else
-    UNREFERENCED_PARAMETER(resource);
-    UNREFERENCED_PARAMETER(name);
-    UNREFERENCED_PARAMETER(nameLen);
-#endif
-}
-
-template <typename T, size_t N>
-inline void SetDebugObjectName(T resource, const char(&name)[N]) {
-    SetDebugObjectName(resource, name, N - 1);
-}
-
-template <typename T>
-inline void SetDebugObjectName(T resource, const std::string& name) {
-    SetDebugObjectName(resource, name.c_str(), name.size());
-}
-
-struct DepthBuffer {
-    ID3D11DepthStencilViewPtr TexDsv;
-    std::string name;
-    DepthBuffer() = default;
-    DepthBuffer(const char* name, ID3D11Device* device, Sizei size);
-};
-
-struct RenderTarget {
-    ID3D11Texture2DPtr Tex;
-    ID3D11ShaderResourceViewPtr TexSv;
-    ID3D11RenderTargetViewPtr TexRtv;
-    Sizei Size = Sizei{};
-    std::string name;
-
-    RenderTarget() = default;
-    RenderTarget(const char* name, ID3D11Device* device, Sizei size);
+struct EyeTarget {
+    ID3D11Texture2DPtr tex;
+    ID3D11ShaderResourceViewPtr srv;
+    ID3D11RenderTargetViewPtr rtv;
+    ID3D11DepthStencilViewPtr dsv;
+    ovrRecti viewport;
+    Sizei size;
+    
+    EyeTarget() = default;
+    EyeTarget(ID3D11Device* device, Sizei size);
 };
 
 struct ImageBuffer {
     ID3D11ShaderResourceViewPtr TexSv;
-    std::string name;
 
     ImageBuffer() = default;
-    ImageBuffer(const char* name, ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
+    ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data);
 };
 
 struct DataBuffer {
@@ -112,36 +83,19 @@ struct DataBuffer {
     void Refresh(ID3D11DeviceContext* deviceContext, const void* buffer, size_t size);
 };
 
-struct SecondWindow {
-    const wchar_t* className = L"OVRSecondWindow";
-    HINSTANCE hinst = nullptr;
-    int width = 0;
-    int height = 0;
-    HWND Window = nullptr;
-    IDXGISwapChainPtr SwapChain;
-    ID3D11RenderTargetViewPtr BackBufferRT;
-    std::unique_ptr<DepthBuffer> depthBuffer;
-
-    ~SecondWindow();
-    void Init(HINSTANCE hinst, ID3D11Device* device);
-};
-
 struct DirectX11 {
+    HINSTANCE hinst = nullptr;
     HWND Window = nullptr;
     bool Key[256];
-    Sizei RenderTargetSize;
     ID3D11DevicePtr Device;
     ID3D11DeviceContextPtr Context;
     IDXGISwapChainPtr SwapChain;
     ID3D11RenderTargetViewPtr BackBufferRT;
     std::unique_ptr<DataBuffer> UniformBufferGen;
-    std::unique_ptr<SecondWindow> secondWindow;
 
-    DirectX11();
+    DirectX11(HINSTANCE hinst, Recti vp);
     ~DirectX11();
-    bool InitWindowAndDevice(HINSTANCE hinst, Recti vp);
-    void InitSecondWindow(HINSTANCE hinst);
-    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, DepthBuffer* depthbuffer,
+    void ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget, ID3D11DepthStencilView* depthbuffer,
                                  Recti vp);
     void Render(struct ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
                 int count);
@@ -160,8 +114,7 @@ struct Shader {
         int Offset, Size;
     };
 
-    int numUniformInfo;
-    Uniform UniformInfo[10];
+    std::vector<Uniform> UniformInfo;
 
     Shader(ID3D11Device* device, ID3D10Blob* s, int which_type);
 
@@ -176,7 +129,7 @@ struct ShaderFill {
     ID3D11SamplerStatePtr SamplerState;
 
     ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDesc, int numVertexDesc,
-               char* vertexShader, char* pixelShader, std::unique_ptr<ImageBuffer>&& t,
+               const char* vertexShader, const char* pixelShader, std::unique_ptr<ImageBuffer>&& t,
                bool wrap = 1);
 };
 
@@ -196,16 +149,13 @@ struct Model {
     Vector3f Pos;
     Quatf Rot;
     Matrix4f Mat;
-    int numVertices, numIndices;
-    Vertex Vertices[2000];  // Note fixed maximum
-    uint16_t Indices[2000];
+    std::vector<Vertex> Vertices;
+    std::vector<uint16_t> Indices;
     std::unique_ptr<ShaderFill> Fill;
     std::unique_ptr<DataBuffer> VertexBuffer;
     std::unique_ptr<DataBuffer> IndexBuffer;
 
     Model(Vector3f arg_pos, std::unique_ptr<ShaderFill>&& arg_Fill) {
-        numVertices = 0;
-        numIndices = 0;
         Pos = arg_pos;
         Fill = std::move(arg_Fill);
     }
@@ -213,14 +163,6 @@ struct Model {
         Mat = Matrix4f(Rot);
         Mat = Matrix4f::Translation(Pos) * Mat;
         return Mat;
-    }
-    void AddVertex(const Vertex& v) {
-        Vertices[numVertices++] = v;
-        OVR_ASSERT(numVertices < 2000);
-    }
-    void AddIndex(uint16_t a) {
-        Indices[numIndices++] = a;
-        OVR_ASSERT(numIndices < 2000);
     }
 
     void AllocateBuffers(ID3D11Device* device);

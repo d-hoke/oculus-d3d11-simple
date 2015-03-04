@@ -20,7 +20,6 @@ DataBuffer::DataBuffer(ID3D11Device* device, D3D11_BIND_FLAG use, const void* bu
     sr.pSysMem = buffer;
     sr.SysMemPitch = sr.SysMemSlicePitch = 0;
     ThrowOnFailure(device->CreateBuffer(&desc, buffer ? &sr : nullptr, &D3DBuffer));
-    SetDebugObjectName(D3DBuffer, "DataBuffer::D3DBuffer");
 }
 
 void DataBuffer::Refresh(ID3D11DeviceContext* deviceContext, const void* buffer, size_t size) {
@@ -30,39 +29,33 @@ void DataBuffer::Refresh(ID3D11DeviceContext* deviceContext, const void* buffer,
     deviceContext->Unmap(D3DBuffer, 0);
 }
 
-DepthBuffer::DepthBuffer(const char* name_, ID3D11Device* device, Sizei size) : name(name_) {
-    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_D32_FLOAT, size.w, size.h);
+EyeTarget::EyeTarget(ID3D11Device* device, Sizei requestedSize) {
+    CD3D11_TEXTURE2D_DESC texDesc(DXGI_FORMAT_R8G8B8A8_UNORM, requestedSize.w, requestedSize.h);
+    texDesc.MipLevels = 1;
+    texDesc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    device->CreateTexture2D(&texDesc, nullptr, &tex);
+    device->CreateShaderResourceView(tex, nullptr, &srv);
+    device->CreateRenderTargetView(tex, nullptr, &rtv);
+    tex->GetDesc(&texDesc);
+    size = Sizei(texDesc.Width, texDesc.Height);
+
+    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_D32_FLOAT, texDesc.Width, texDesc.Height);
     dsDesc.MipLevels = 1;
     dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    ID3D11Texture2DPtr tex;
-    device->CreateTexture2D(&dsDesc, nullptr, &tex);
-    SetDebugObjectName(tex, string("DepthBuffer::tex - ") + name);
-    device->CreateDepthStencilView(tex, nullptr, &TexDsv);
-    SetDebugObjectName(TexDsv, string("DepthBuffer::TexDsv - ") + name);
+    ID3D11Texture2DPtr dsTex;
+    device->CreateTexture2D(&dsDesc, nullptr, &dsTex);
+    device->CreateDepthStencilView(dsTex, nullptr, &dsv);
+
+    viewport.Pos = Vector2i(0, 0);
+    viewport.Size = Sizei(texDesc.Width, texDesc.Height);
 }
 
-RenderTarget::RenderTarget(const char* name_, ID3D11Device* device, Sizei size)
-    : name(name_), Size(size) {
-    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, size.w, size.h);
-    dsDesc.MipLevels = 1;
-    dsDesc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-    device->CreateTexture2D(&dsDesc, nullptr, &Tex);
-    SetDebugObjectName(Tex, string("RenderTarget::Tex - ") + name);
-    device->CreateShaderResourceView(Tex, nullptr, &TexSv);
-    SetDebugObjectName(TexSv, string("RenderTarget::TexSv - ") + name);
-    device->CreateRenderTargetView(Tex, nullptr, &TexRtv);
-    SetDebugObjectName(TexRtv, string("RenderTarget::TexRtv - ") + name);
-}
-
-ImageBuffer::ImageBuffer(const char* name_, ID3D11Device* device,
-                         ID3D11DeviceContext* deviceContext, Sizei size, unsigned char* data)
-    : name(name_) {
+ImageBuffer::ImageBuffer(ID3D11Device* device, ID3D11DeviceContext* deviceContext, Sizei size,
+                         unsigned char* data) {
     CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_R8G8B8A8_UNORM, size.w, size.h);
     ID3D11Texture2DPtr tex;
     device->CreateTexture2D(&dsDesc, nullptr, &tex);
-    SetDebugObjectName(tex, string("ImageBuffer::tex - ") + name);
     device->CreateShaderResourceView(tex, nullptr, &TexSv);
-    SetDebugObjectName(TexSv, string("ImageBuffer::TexSv - ") + name);
 
     if (data)  // Note data is trashed, as is width and height
     {
@@ -93,74 +86,40 @@ ImageBuffer::ImageBuffer(const char* name_, ID3D11Device* device,
     }
 }
 
-DirectX11::DirectX11() { fill(begin(Key), end(Key), false); }
-
-DirectX11::~DirectX11() {
-    Context->ClearState();
-    Context->Flush();
-    secondWindow = nullptr;
-    UniformBufferGen = nullptr;
-    BackBufferRT = nullptr;
-    SwapChain = nullptr;
-    Context = nullptr;
-
-    ID3D11DebugPtr d3dDebugDevice;
-    if (SUCCEEDED(Device->QueryInterface(__uuidof(ID3D11Debug),
-                                         reinterpret_cast<void**>(&d3dDebugDevice)))) {
-        Device = nullptr;
-        d3dDebugDevice->ReportLiveDeviceObjects(D3D11_RLDO_SUMMARY | D3D11_RLDO_DETAIL);
-    }
-}
-
-void DirectX11::ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
-                                        DepthBuffer* depthbuffer, Recti vp) {
-    float black[] = {0, 0, 0, 1};
-    Context->OMSetRenderTargets(1, &rendertarget, depthbuffer->TexDsv);
-    Context->ClearRenderTargetView(rendertarget, black);
-    Context->ClearDepthStencilView(depthbuffer->TexDsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1,
-                                   0);
-    D3D11_VIEWPORT D3Dvp;
-    D3Dvp.Width = (float)vp.w;
-    D3Dvp.Height = (float)vp.h;
-    D3Dvp.MinDepth = 0;
-    D3Dvp.MaxDepth = 1;
-    D3Dvp.TopLeftX = (float)vp.x;
-    D3Dvp.TopLeftY = (float)vp.y;
-    Context->RSSetViewports(1, &D3Dvp);
-}
-
 LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     static DirectX11* dx11 = nullptr;
 
     switch (msg) {
-        case (WM_NCCREATE): {
-            CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lp);
-            if (createStruct->lpCreateParams) {
-                dx11 = reinterpret_cast<DirectX11*>(createStruct->lpCreateParams);
-                dx11->Window = arg_hwnd;
-            }
-            break;
+    case (WM_NCCREATE) : {
+        CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lp);
+        if (createStruct->lpCreateParams) {
+            dx11 = reinterpret_cast<DirectX11*>(createStruct->lpCreateParams);
+            dx11->Window = arg_hwnd;
         }
-        case WM_KEYDOWN:
-            dx11->Key[(unsigned)wp] = true;
-            break;
-        case WM_KEYUP:
-            dx11->Key[(unsigned)wp] = false;
-            break;
-        case WM_SETFOCUS:
-            SetCapture(dx11->Window);
-            ShowCursor(FALSE);
-            break;
-        case WM_KILLFOCUS:
-            ReleaseCapture();
-            ShowCursor(TRUE);
-            break;
+        break;
+    }
+    case WM_KEYDOWN:
+        dx11->Key[(unsigned)wp] = true;
+        break;
+    case WM_KEYUP:
+        dx11->Key[(unsigned)wp] = false;
+        break;
+    case WM_SETFOCUS:
+        SetCapture(dx11->Window);
+        ShowCursor(FALSE);
+        break;
+    case WM_KILLFOCUS:
+        ReleaseCapture();
+        ShowCursor(TRUE);
+        break;
     }
     return DefWindowProc(arg_hwnd, msg, wp, lp);
 }
 
-bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
-    Window = [hinst, vp, this] {
+DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
+    fill(begin(Key), end(Key), false); 
+
+    Window = [this, vp] {
         const auto className = L"OVRAppWindow";
         WNDCLASSW wc{};
         wc.lpszClassName = className;
@@ -169,17 +128,14 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
 
         const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
         const auto sizeDivisor = 2;
-        RECT winSize = {0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
+        RECT winSize = { 0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor };
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, vp.x, vp.y,
-                             winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
-                             nullptr, hinst, this);
+            winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
+            nullptr, hinst, this);
     }();
-    if (!Window) return false;
 
-    RenderTargetSize = vp.GetSize();
-
-    [this] {
+    [this, vp] {
         IDXGIFactoryPtr DXGIFactory;
         ThrowOnFailure(
             CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
@@ -197,8 +153,8 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
 
         DXGI_SWAP_CHAIN_DESC scDesc{};
         scDesc.BufferCount = 2;
-        scDesc.BufferDesc.Width = RenderTargetSize.w;
-        scDesc.BufferDesc.Height = RenderTargetSize.h;
+        scDesc.BufferDesc.Width = vp.GetSize().w;
+        scDesc.BufferDesc.Height = vp.GetSize().h;
         scDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         scDesc.OutputWindow = Window;
@@ -211,108 +167,53 @@ bool DirectX11::InitWindowAndDevice(HINSTANCE hinst, Recti vp) {
             Adapter, Adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
             creationFlags, nullptr, 0, D3D11_SDK_VERSION, &scDesc, &SwapChain, &Device, nullptr,
             &Context));
-
-        SetDebugObjectName(SwapChain, "Direct3D11::SwapChain");
     }();
 
     ID3D11Texture2DPtr backBuffer;
     ThrowOnFailure(
         SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
-    SetDebugObjectName(backBuffer, "Direct3D11 backBuffer");
     ThrowOnFailure(Device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
-    SetDebugObjectName(BackBufferRT, "Direct3D11::BackBufferRT");
 
     UniformBufferGen = std::make_unique<DataBuffer>(Device, D3D11_BIND_CONSTANT_BUFFER, nullptr,
-                                                    2000);  // make sure big enough
+        2000);  // make sure big enough
 
     [this] {
-        CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
+        CD3D11_RASTERIZER_DESC rs{ D3D11_DEFAULT };
         ID3D11RasterizerStatePtr Rasterizer;
         ThrowOnFailure(Device->CreateRasterizerState(&rs, &Rasterizer));
-        SetDebugObjectName(Rasterizer, "Direct3D11::Rasterizer");
         Context->RSSetState(Rasterizer);
     }();
 
     [this] {
-        CD3D11_DEPTH_STENCIL_DESC dss{D3D11_DEFAULT};
+        CD3D11_DEPTH_STENCIL_DESC dss{ D3D11_DEFAULT };
         ID3D11DepthStencilStatePtr DepthState;
         ThrowOnFailure(Device->CreateDepthStencilState(&dss, &DepthState));
-        SetDebugObjectName(DepthState, "Direct3D11::DepthState");
         Context->OMSetDepthStencilState(DepthState, 0);
     }();
-
-    return true;
 }
 
-SecondWindow::~SecondWindow() {
+DirectX11::~DirectX11() {
+    Context->ClearState();
+    Context->Flush();
+
     DestroyWindow(Window);
-    UnregisterClassW(className, hinst);
+    UnregisterClassW(L"OVRAppWindow", hinst);
 }
 
-void SecondWindow::Init(HINSTANCE hinst_, ID3D11Device* device) {
-    hinst = hinst_;
-    width = 640;
-    height = 360;
-
-    Window = [this] {
-        WNDCLASSW wc{};
-        wc.lpszClassName = className;
-        wc.lpfnWndProc = SystemWindowProc;
-        RegisterClassW(&wc);
-
-        const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
-        RECT winSize = {0, 0, width, height};
-        AdjustWindowRect(&winSize, wsStyle, false);
-        return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, 100, 100,
-                             winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
-                             nullptr, hinst, nullptr);
-    }();
-    if (!Window) throw runtime_error{"Failed to create second window!"};
-
-    [this, device] {
-        IDXGIDevice1Ptr DXGIDevice;
-        ThrowOnFailure(
-            device->QueryInterface(__uuidof(IDXGIDevice1), reinterpret_cast<void**>(&DXGIDevice)));
-
-        IDXGIAdapterPtr Adapter;
-        ThrowOnFailure(
-            DXGIDevice->GetParent(__uuidof(IDXGIAdapter), reinterpret_cast<void**>(&Adapter)));
-
-        IDXGIFactoryPtr DXGIFactory;
-        ThrowOnFailure(
-            Adapter->GetParent(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
-
-        DXGI_SWAP_CHAIN_DESC scDesc{};
-        scDesc.BufferCount = 2;
-        scDesc.BufferDesc.Width = width;
-        scDesc.BufferDesc.Height = height;
-        scDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        scDesc.OutputWindow = Window;
-        scDesc.SampleDesc.Count = 1;
-        scDesc.SampleDesc.Quality = 0;
-        scDesc.Windowed = TRUE;
-        scDesc.Flags = 0;
-
-        ThrowOnFailure(DXGIFactory->CreateSwapChain(device, &scDesc, &SwapChain));
-        SetDebugObjectName(SwapChain, "SecondWindow::SwapChain");
-    }();
-
-    ID3D11Texture2DPtr backBuffer;
-    ThrowOnFailure(
-        SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
-    SetDebugObjectName(backBuffer, "SecondWindow backBuffer");
-
-    ThrowOnFailure(device->CreateRenderTargetView(backBuffer, nullptr, &BackBufferRT));
-    SetDebugObjectName(BackBufferRT, "SecondWindow::BackBufferRT");
-
-    depthBuffer =
-        std::make_unique<DepthBuffer>("SecondWindow::DepthBuffer", device, Sizei(width, height));
-}
-
-void DirectX11::InitSecondWindow(HINSTANCE hinst) {
-    secondWindow = make_unique<SecondWindow>();
-    secondWindow->Init(hinst, Device);
+void DirectX11::ClearAndSetRenderTarget(ID3D11RenderTargetView* rendertarget,
+                                        ID3D11DepthStencilView* dsv, Recti vp) {
+    const float black[] = {0.f, 0.f, 0.f, 1.f};
+    Context->OMSetRenderTargets(1, &rendertarget, dsv);
+    Context->ClearRenderTargetView(rendertarget, black);
+    Context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
+    D3D11_VIEWPORT d3dvp;
+    d3dvp.TopLeftX = static_cast<float>(vp.x);
+    d3dvp.TopLeftY = static_cast<float>(vp.y);
+    d3dvp.Width = static_cast<float>(vp.w);
+    d3dvp.Height = static_cast<float>(vp.h);
+    d3dvp.MinDepth = 0.f;
+    d3dvp.MaxDepth = 1.f;
+    Context->RSSetViewports(1, &d3dvp);
 }
 
 void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indices, UINT stride,
@@ -330,8 +231,8 @@ void DirectX11::Render(ShaderFill* fill, DataBuffer* vertices, DataBuffer* indic
     Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
     Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    Context->VSSetShader(fill->VShader->D3DVert, NULL, 0);
-    Context->PSSetShader(fill->PShader->D3DPix, NULL, 0);
+    Context->VSSetShader(fill->VShader->D3DVert, nullptr, 0);
+    Context->PSSetShader(fill->PShader->D3DPix, nullptr, 0);
     ID3D11SamplerState* samplerStates[] = {fill->SamplerState};
     Context->PSSetSamplers(0, 1, samplerStates);
 
@@ -354,25 +255,19 @@ void DirectX11::HandleMessages() {
     }
 }
 
-void DirectX11::ReleaseWindow(HINSTANCE hinst) {
-    DestroyWindow(Window);
-    UnregisterClassW(L"OVRAppWindow", hinst);
-}
-
 ShaderFill::ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDesc,
-                       int numVertexDesc, char* vertexShader, char* pixelShader,
+                       int numVertexDesc, const char* vertexShader, const char* pixelShader,
                        std::unique_ptr<ImageBuffer>&& t, bool wrap)
     : OneTexture(std::move(t)) {
     ID3D10BlobPtr blobData;
-    D3DCompile(vertexShader, strlen(vertexShader), NULL, NULL, NULL, "main", "vs_4_0", 0, 0,
-               &blobData, NULL);
+    ThrowOnFailure(D3DCompile(vertexShader, strlen(vertexShader), NULL, NULL, NULL, "main", "vs_4_0", 0, 0,
+               &blobData, NULL));
     VShader = std::make_unique<Shader>(device, blobData, 0);
     device->CreateInputLayout(VertexDesc, numVertexDesc, blobData->GetBufferPointer(),
                               blobData->GetBufferSize(), &InputLayout);
-    SetDebugObjectName(InputLayout, "ShaderFill::InputLayout");
 
-    D3DCompile(pixelShader, strlen(pixelShader), NULL, NULL, NULL, "main", "ps_4_0", 0, 0,
-               &blobData, NULL);
+    ThrowOnFailure(D3DCompile(pixelShader, strlen(pixelShader), NULL, NULL, NULL, "main", "ps_4_0", 0, 0,
+               &blobData, NULL));
     PShader = std::make_unique<Shader>(device, blobData, 1);
 
     CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
@@ -383,11 +278,11 @@ ShaderFill::ShaderFill(ID3D11Device* device, D3D11_INPUT_ELEMENT_DESC* VertexDes
     device->CreateSamplerState(&ss, &SamplerState);
 }
 
-Shader::Shader(ID3D11Device* device, ID3D10Blob* s, int which_type) : numUniformInfo(0) {
+Shader::Shader(ID3D11Device* device, ID3D10Blob* s, int which_type) {
     if (which_type == 0)
-        device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert);
+        ThrowOnFailure(device->CreateVertexShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DVert));
     else
-        device->CreatePixelShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DPix);
+        ThrowOnFailure(device->CreatePixelShader(s->GetBufferPointer(), s->GetBufferSize(), NULL, &D3DPix));
 
     ID3D11ShaderReflectionPtr ref;
     D3DReflect(s->GetBufferPointer(), s->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&ref);
@@ -395,24 +290,23 @@ Shader::Shader(ID3D11Device* device, ID3D10Blob* s, int which_type) : numUniform
     D3D11_SHADER_BUFFER_DESC bufd;
     if (FAILED(buf->GetDesc(&bufd))) return;
 
-    for (unsigned i = 0; i < bufd.Variables; i++) {
+    for (unsigned i = 0; i < bufd.Variables; ++i) {
         ID3D11ShaderReflectionVariable* var = buf->GetVariableByIndex(i);
         D3D11_SHADER_VARIABLE_DESC vd;
         var->GetDesc(&vd);
         Uniform u;
         strcpy_s(u.Name, (const char*)vd.Name);
-        ;
         u.Offset = vd.StartOffset;
         u.Size = vd.Size;
-        UniformInfo[numUniformInfo++] = u;
+        UniformInfo.push_back(u);
     }
     UniformData.resize(bufd.Size);
 }
 
 void Shader::SetUniform(const char* name, int n, const float* v) {
-    for (int i = 0; i < numUniformInfo; ++i) {
-        if (!strcmp(UniformInfo[i].Name, name)) {
-            memcpy(UniformData.data() + UniformInfo[i].Offset, v, n * sizeof(float));
+    for (const auto& uniform : UniformInfo) {
+        if (!strcmp(uniform.Name, name)) {
+            memcpy(UniformData.data() + uniform.Offset, v, n * sizeof(float));
             return;
         }
     }
@@ -420,9 +314,9 @@ void Shader::SetUniform(const char* name, int n, const float* v) {
 
 void Model::AllocateBuffers(ID3D11Device* device) {
     VertexBuffer = std::make_unique<DataBuffer>(device, D3D11_BIND_VERTEX_BUFFER, &Vertices[0],
-                                                numVertices * sizeof(Vertex));
+                                                Vertices.size() * sizeof(Vertex));
     IndexBuffer =
-        std::make_unique<DataBuffer>(device, D3D11_BIND_INDEX_BUFFER, &Indices[0], numIndices * 2);
+        std::make_unique<DataBuffer>(device, D3D11_BIND_INDEX_BUFFER, &Indices[0], Indices.size() * 2);
 }
 
 void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2, Color c) {
@@ -445,7 +339,7 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
                               8,  9,  11, 11, 9,  10, 13, 12, 14, 14, 12, 15,
                               16, 17, 19, 19, 17, 18, 21, 20, 22, 22, 20, 23};
 
-    for (int i = 0; i < 36; i++) AddIndex(CubeIndices[i] + (uint16_t)numVertices);
+    for (int i = 0; i < 36; i++) Indices.push_back(CubeIndices[i] + (uint16_t)Vertices.size());
 
     for (int v = 0; v < 24; v++) {
         Vertex vvv;
@@ -462,7 +356,7 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
         vvv.C.R = RRR > 255 ? 255 : (unsigned char)RRR;
         vvv.C.G = GGG > 255 ? 255 : (unsigned char)GGG;
         vvv.C.B = BBB > 255 ? 255 : (unsigned char)BBB;
-        AddVertex(vvv);
+        Vertices.push_back(vvv);
     }
 }
 
@@ -478,20 +372,25 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
          D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
 
-    char* VertexShaderSrc =
-        "float4x4 Proj, View;"
-        "float4 NewCol;"
-        "void main(in  float4 Position  : POSITION,    in  float4 Color : COLOR0, in  float2 "
-        "TexCoord  : TEXCOORD0,"
-        "          out float4 oPosition : SV_Position, out float4 oColor: COLOR0, out float2 "
-        "oTexCoord : TEXCOORD0)"
-        "{   oPosition = mul(Proj, mul(View, Position)); oTexCoord = TexCoord; oColor = Color; "
-        "}";
-    char* PixelShaderSrc =
-        "Texture2D Texture   : register(t0); SamplerState Linear : register(s0); "
-        "float4 main(in float4 Position : SV_Position, in float4 Color: COLOR0, in float2 "
-        "TexCoord : TEXCOORD0) : SV_Target"
-        "{   return Color * Texture.Sample(Linear, TexCoord); }";
+    const char* VertexShaderSrc = R"(
+        float4x4 Proj, View;
+        float4 NewCol;
+        void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0,
+                  out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0)
+        {
+            oPosition = mul(Proj, mul(View, Position)); 
+            oTexCoord = TexCoord; 
+            oColor = Color; 
+        }
+    )";
+    const char* PixelShaderSrc = R"(
+        Texture2D Texture : register(t0);
+        SamplerState Linear : register(s0); 
+        float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0) : SV_Target
+        {
+            return Color * Texture.Sample(Linear, TexCoord);
+        };
+    )";
 
     // Construct textures
     const auto texWidthHeight = 256;
@@ -521,7 +420,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int reduc
                         Model::Color(128, 128, 128, 255);  // blank
             }
         std::unique_ptr<ImageBuffer> t = std::make_unique<ImageBuffer>(
-            "generated_texture", device, deviceContext, Sizei(texWidthHeight, texWidthHeight),
+            device, deviceContext, Sizei(texWidthHeight, texWidthHeight),
             (unsigned char*)tex_pixels[k]);
         generated_texture[k] = std::make_unique<ShaderFill>(
             device, ModelVertexDesc, 3, VertexShaderSrc, PixelShaderSrc, std::move(t));
@@ -643,6 +542,6 @@ void Scene::Render(DirectX11& dx11, Matrix4f view, Matrix4f proj) {
         Models[i]->Fill->VShader->SetUniform("Proj", 16, (float*)&proj);
 
         dx11.Render(Models[i]->Fill.get(), Models[i]->VertexBuffer.get(),
-                    Models[i]->IndexBuffer.get(), sizeof(Model::Vertex), Models[i]->numIndices);
+                    Models[i]->IndexBuffer.get(), sizeof(Model::Vertex), Models[i]->Indices.size());
     }
 }
