@@ -483,7 +483,6 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
 
         const char* VertexShaderSrc = R"(
         float4x4 Proj, View;
-        float4 NewCol;
         void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0,
                   out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0)
         {
