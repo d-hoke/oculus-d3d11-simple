@@ -334,7 +334,7 @@ void ThrowOnFailure(HRESULT hr) {
 EyeTarget::EyeTarget(ID3D11Device* device, Sizei requestedSize) {
     CD3D11_TEXTURE2D_DESC texDesc(DXGI_FORMAT_R8G8B8A8_UNORM, requestedSize.w, requestedSize.h);
     texDesc.MipLevels = 1;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    texDesc.BindFlags |= D3D11_BIND_RENDER_TARGET;
     device->CreateTexture2D(&texDesc, nullptr, &tex);
     device->CreateShaderResourceView(tex, nullptr, &srv);
     device->CreateRenderTargetView(tex, nullptr, &rtv);
