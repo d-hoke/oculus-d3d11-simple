@@ -109,7 +109,8 @@ struct Model {
     struct Color {
         unsigned char r, g, b, a;
 
-        Color(unsigned char r_ = 0, unsigned char g_ = 0, unsigned char b_ = 0, unsigned char a_ = 0xff)
+        Color(unsigned char r_ = 0, unsigned char g_ = 0, unsigned char b_ = 0,
+              unsigned char a_ = 0xff)
             : r{r_}, g{g_}, b{b_}, a{a_} {}
     };
     struct Vertex {
@@ -191,10 +192,10 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
     unique_ptr<const ovrHmdDesc, decltype(hmdDestroy)> hmd{hmdCreate(), hmdDestroy};
 
     // Create the Direct3D11 device and window
-    DirectX11 DX11{hinst, Recti{hmd->WindowsPos, hmd->Resolution}};
+    DirectX11 dx11{hinst, Recti{hmd->WindowsPos, hmd->Resolution}};
 
     // Attach HMD to window and initialize tracking
-    throwOnError(ovrHmd_AttachToWindow(hmd.get(), DX11.window, nullptr, nullptr), hmd.get());
+    throwOnError(ovrHmd_AttachToWindow(hmd.get(), dx11.window, nullptr, nullptr), hmd.get());
     ovrHmd_SetEnabledCaps(hmd.get(), ovrHmdCap_LowPersistence | ovrHmdCap_DynamicPrediction);
     throwOnError(ovrHmd_ConfigureTracking(hmd.get(), ovrTrackingCap_Orientation |
                                                          ovrTrackingCap_MagYawCorrection |
@@ -204,21 +205,21 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
 
     // Create the eye render targets.
     const EyeTarget eyeTargets[] = {
-        {DX11.device,
+        {dx11.device,
          ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Left, hmd->DefaultEyeFov[ovrEye_Left], 1.0f)},
-        {DX11.device, ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Right,
+        {dx11.device, ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Right,
                                                hmd->DefaultEyeFov[ovrEye_Right], 1.0f)}};
 
     // Configure SDK rendering
-    auto eyeRenderDesc = [&DX11, &hmd] {
+    auto eyeRenderDesc = [&dx11, &hmd] {
         ovrD3D11Config d3d11cfg{};
         d3d11cfg.D3D11.Header.API = ovrRenderAPI_D3D11;
         d3d11cfg.D3D11.Header.BackBufferSize = hmd->Resolution;
         d3d11cfg.D3D11.Header.Multisample = 1;
-        d3d11cfg.D3D11.pDevice = DX11.device;
-        d3d11cfg.D3D11.pDeviceContext = DX11.context;
-        d3d11cfg.D3D11.pBackBufferRT = DX11.backBufferRT;
-        d3d11cfg.D3D11.pSwapChain = DX11.swapChain;
+        d3d11cfg.D3D11.pDevice = dx11.device;
+        d3d11cfg.D3D11.pDeviceContext = dx11.context;
+        d3d11cfg.D3D11.pBackBufferRT = dx11.backBufferRT;
+        d3d11cfg.D3D11.pSwapChain = dx11.swapChain;
 
         array<ovrEyeRenderDesc, 2> res;
         throwOnError(
@@ -231,16 +232,16 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
     }();
 
     // Create the room models
-    Scene roomScene{DX11.device, DX11.context};
+    Scene roomScene{dx11.device, dx11.context};
 
-    float Yaw = 3.141592f;            // Horizontal rotation of the player
-    Vector3f Pos{0.0f, 1.6f, -5.0f};  // Position of player
+    float yaw = 3.141592f;            // Horizontal rotation of the player
+    Vector3f pos{0.0f, 1.6f, -5.0f};  // Position of player
 
     // MAIN LOOP
     // =========
     int appClock = 0;
 
-    while (!(DX11.keys['Q'] && DX11.keys[VK_CONTROL]) && !DX11.keys[VK_ESCAPE]) {
+    while (!(dx11.keys['Q'] && dx11.keys[VK_CONTROL]) && !dx11.keys[VK_ESCAPE]) {
         ++appClock;
 
         MSG msg{};
@@ -256,25 +257,25 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         ovrHmd_BeginFrame(hmd.get(), 0);
 
         // Recenter the Rift by pressing 'R'
-        if (DX11.keys['R']) ovrHmd_RecenterPose(hmd.get());
+        if (dx11.keys['R']) ovrHmd_RecenterPose(hmd.get());
 
         // Dismiss the Health and Safety message by pressing any key
-        if (DX11.IsAnyKeyPressed()) ovrHmd_DismissHSWDisplay(hmd.get());
+        if (dx11.IsAnyKeyPressed()) ovrHmd_DismissHSWDisplay(hmd.get());
 
         // Keyboard inputs to adjust player orientation
-        if (DX11.keys[VK_LEFT]) Yaw += 0.02f;
-        if (DX11.keys[VK_RIGHT]) Yaw -= 0.02f;
+        if (dx11.keys[VK_LEFT]) yaw += 0.02f;
+        if (dx11.keys[VK_RIGHT]) yaw -= 0.02f;
 
         // Keyboard inputs to adjust player position
-        if (DX11.keys['W'] || DX11.keys[VK_UP])
-            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, -speed * 0.05f));
-        if (DX11.keys['S'] || DX11.keys[VK_DOWN])
-            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, +speed * 0.05f));
-        if (DX11.keys['D'])
-            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(+speed * 0.05f, 0, 0));
-        if (DX11.keys['A'])
-            Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(-speed * 0.05f, 0, 0));
-        Pos.y = ovrHmd_GetFloat(hmd.get(), OVR_KEY_EYE_HEIGHT, Pos.y);
+        if (dx11.keys['W'] || dx11.keys[VK_UP])
+            pos += Matrix4f::RotationY(yaw).Transform(Vector3f(0, 0, -speed * 0.05f));
+        if (dx11.keys['S'] || dx11.keys[VK_DOWN])
+            pos += Matrix4f::RotationY(yaw).Transform(Vector3f(0, 0, +speed * 0.05f));
+        if (dx11.keys['D'])
+            pos += Matrix4f::RotationY(yaw).Transform(Vector3f(+speed * 0.05f, 0, 0));
+        if (dx11.keys['A'])
+            pos += Matrix4f::RotationY(yaw).Transform(Vector3f(-speed * 0.05f, 0, 0));
+        pos.y = ovrHmd_GetFloat(hmd.get(), OVR_KEY_EYE_HEIGHT, pos.y);
 
         // Animate the cube
         roomScene.models[0]->pos =
@@ -289,14 +290,14 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
             const auto& useTarget = eyeTargets[eye];
             const auto& useEyePose = eyePoses[eye];
 
-            DX11.ClearAndSetEyeTarget(useTarget);
+            dx11.ClearAndSetEyeTarget(useTarget);
 
             // Get view and projection matrices (note near Z to reduce eye strain)
-            const Matrix4f rollPitchYaw = Matrix4f::RotationY(Yaw);
+            const Matrix4f rollPitchYaw = Matrix4f::RotationY(yaw);
             const Matrix4f finalRollPitchYaw = rollPitchYaw * Matrix4f(useEyePose.Orientation);
             const Vector3f finalUp = finalRollPitchYaw.Transform(Vector3f{0, 1, 0});
             const Vector3f finalForward = finalRollPitchYaw.Transform(Vector3f{0, 0, -1});
-            const Vector3f shiftedEyePos = Pos + rollPitchYaw.Transform(useEyePose.Position);
+            const Vector3f shiftedEyePos = pos + rollPitchYaw.Transform(useEyePose.Position);
 
             const Matrix4f view =
                 Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
@@ -304,7 +305,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
                 ovrMatrix4f_Projection(eyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
 
             // Render the scene
-            roomScene.Render(DX11, view, proj);
+            roomScene.Render(dx11, view, proj);
         }
 
         // Do distortion rendering, Present and flush/sync
@@ -402,8 +403,7 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
                              nullptr, hinst, this);
     }();
 
-    [vp](HWND hwnd, IDXGISwapChain** sc, ID3D11Device** dev,
-         ID3D11DeviceContext** ctx) {
+    [vp](HWND hwnd, IDXGISwapChain** sc, ID3D11Device** dev, ID3D11DeviceContext** ctx) {
         IDXGIFactoryPtr DXGIFactory;
         ThrowOnFailure(
             CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
@@ -432,14 +432,13 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
 
         ThrowOnFailure(D3D11CreateDeviceAndSwapChain(
             Adapter, Adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
-            creationFlags, nullptr, 0, D3D11_SDK_VERSION, &scDesc, sc, dev, nullptr,
-            ctx));
+            creationFlags, nullptr, 0, D3D11_SDK_VERSION, &scDesc, sc, dev, nullptr, ctx));
     }(window, &swapChain, &device, &context);
 
     [](IDXGISwapChain* sc, ID3D11Device* dev, ID3D11RenderTargetView** backBufferRtv) {
         ID3D11Texture2DPtr backBuffer;
-        ThrowOnFailure(sc->GetBuffer(0, __uuidof(ID3D11Texture2D),
-                                            reinterpret_cast<void**>(&backBuffer)));
+        ThrowOnFailure(
+            sc->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)));
         ThrowOnFailure(dev->CreateRenderTargetView(backBuffer, nullptr, backBufferRtv));
     }(swapChain, device, &backBufferRT);
 
@@ -450,30 +449,29 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
     }(device, &uniformBufferGen);
 
     [](ID3D11Device* dev, ID3D11DeviceContext* ctx) {
-        CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
+        CD3D11_RASTERIZER_DESC desc{D3D11_DEFAULT};
         ID3D11RasterizerStatePtr rasterizerState;
-        ThrowOnFailure(dev->CreateRasterizerState(&rs, &rasterizerState));
+        ThrowOnFailure(dev->CreateRasterizerState(&desc, &rasterizerState));
         ctx->RSSetState(rasterizerState);
     }(device, context);
 
     [](ID3D11Device* dev, ID3D11DeviceContext* ctx) {
-        CD3D11_DEPTH_STENCIL_DESC dss{D3D11_DEFAULT};
+        CD3D11_DEPTH_STENCIL_DESC desc{D3D11_DEFAULT};
         ID3D11DepthStencilStatePtr depthStencilState;
-        ThrowOnFailure(dev->CreateDepthStencilState(&dss, &depthStencilState));
+        ThrowOnFailure(dev->CreateDepthStencilState(&desc, &depthStencilState));
         ctx->OMSetDepthStencilState(depthStencilState, 0);
     }(device, context);
 
     [](ID3D11Device* dev, ID3D11SamplerState** ss) {
-        CD3D11_SAMPLER_DESC ssd{D3D11_DEFAULT};
-        ssd.AddressU = ssd.AddressV = ssd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-        ssd.Filter = D3D11_FILTER_ANISOTROPIC;
-        ssd.MaxAnisotropy = 8;
-        dev->CreateSamplerState(&ssd, ss);
+        CD3D11_SAMPLER_DESC desc{D3D11_DEFAULT};
+        desc.AddressU = desc.AddressV = desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+        desc.Filter = D3D11_FILTER_ANISOTROPIC;
+        desc.MaxAnisotropy = 8;
+        dev->CreateSamplerState(&desc, ss);
     }(device, &samplerState);
 
-    [this](ID3D11Device* dev, ID3D11VertexShader** vertexShader,
-           ID3D11InputLayout** il) {
-        D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
+    [this](ID3D11Device* dev, ID3D11VertexShader** vertexShader, ID3D11InputLayout** il) {
+        D3D11_INPUT_ELEMENT_DESC desc[] = {
             {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, pos),
              D3D11_INPUT_PER_VERTEX_DATA, 0},
             {"Color", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, offsetof(Model::Vertex, c),
@@ -500,7 +498,7 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
                                   nullptr, "main", "vs_4_0", 0, 0, &blobData, nullptr));
 
         ThrowOnFailure(dev->CreateVertexShader(blobData->GetBufferPointer(),
-                                                  blobData->GetBufferSize(), NULL, vertexShader));
+                                               blobData->GetBufferSize(), NULL, vertexShader));
 
         ID3D11ShaderReflectionPtr ref;
         D3DReflect(blobData->GetBufferPointer(), blobData->GetBufferSize(),
@@ -517,8 +515,8 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
         }
         uniformData.resize(bufd.Size);
 
-        device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
-                                  blobData->GetBufferSize(), il);
+        device->CreateInputLayout(desc, 3, blobData->GetBufferPointer(), blobData->GetBufferSize(),
+                                  il);
     }(device, &vShader, &inputLayout);
 
     [](ID3D11Device* dev, ID3D11PixelShader** pixelShader) {
@@ -541,7 +539,7 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
         ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), nullptr, nullptr, nullptr,
                                   "main", "ps_4_0", 0, 0, &blobData, nullptr));
         ThrowOnFailure(dev->CreatePixelShader(blobData->GetBufferPointer(),
-                                                 blobData->GetBufferSize(), nullptr, pixelShader));
+                                              blobData->GetBufferSize(), nullptr, pixelShader));
     }(device, &pShader);
 }
 
