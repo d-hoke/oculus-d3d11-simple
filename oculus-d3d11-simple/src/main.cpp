@@ -1,6 +1,8 @@
 /************************************************************************************
-This is a cut down, cleaned up version of the Oculus SDK tiny room demo.
+This is a cut down, cleaned up version of the Oculus 0.4.4 SDK tiny room demo.
 Simplifications include SDK distortion and Direct to Rift support only.
+Modifications by Matt Newport - http://mattnewport.com/
+
 Original copyright notice below:
 
 ---
@@ -94,7 +96,7 @@ struct DirectX11 {
     ID3D11PixelShaderPtr PShader;
     ID3D11InputLayoutPtr InputLayout;
 
-    DirectX11(HINSTANCE hinst, Recti vp);
+    DirectX11(HINSTANCE hinst, const Recti& vp);
     ~DirectX11();
     void ClearAndSetEyeTarget(const EyeTarget& eyeTarget);
     void Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices, ID3D11Buffer* indices,
@@ -108,7 +110,7 @@ struct Model {
         unsigned char R, G, B, A;
 
         Color(unsigned char r = 0, unsigned char g = 0, unsigned char b = 0, unsigned char a = 0xff)
-            : R(r), G(g), B(b), A(a) {}
+            : R{r}, G{g}, B{b}, A{a} {}
     };
     struct Vertex {
         Vector3f Pos;
@@ -117,16 +119,15 @@ struct Model {
     };
 
     Vector3f Pos;
-    Quatf Rot;
     vector<Vertex> Vertices;
     vector<uint16_t> Indices;
     ID3D11BufferPtr VertexBuffer;
     ID3D11BufferPtr IndexBuffer;
     ID3D11ShaderResourceViewPtr textureSrv;
 
-    Model(Vector3f pos_, ID3D11ShaderResourceView* texSrv) : Pos(pos_), textureSrv(texSrv) {}
+    Model(Vector3f pos_, ID3D11ShaderResourceView* texSrv) : Pos{pos_}, textureSrv{texSrv} {}
 
-    Matrix4f GetMatrix() { return Matrix4f::Translation(Pos) * Matrix4f(Rot); }
+    Matrix4f GetMatrix() { return Matrix4f::Translation(Pos); }
     void AllocateBuffers(ID3D11Device* device);
     void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2,
                                  Color c);
@@ -190,7 +191,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
     unique_ptr<const ovrHmdDesc, decltype(hmdDestroy)> hmd{hmdCreate(), hmdDestroy};
 
     // Create the Direct3D11 device and window
-    DirectX11 DX11(hinst, Recti(hmd->WindowsPos, hmd->Resolution));
+    DirectX11 DX11{hinst, Recti{hmd->WindowsPos, hmd->Resolution}};
 
     // Attach HMD to window and initialize tracking
     throwOnError(ovrHmd_AttachToWindow(hmd.get(), DX11.Window, nullptr, nullptr), hmd.get());
@@ -210,7 +211,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
 
     // Configure SDK rendering
     auto eyeRenderDesc = [&DX11, &hmd] {
-        ovrD3D11Config d3d11cfg;
+        ovrD3D11Config d3d11cfg{};
         d3d11cfg.D3D11.Header.API = ovrRenderAPI_D3D11;
         d3d11cfg.D3D11.Header.BackBufferSize = hmd->Resolution;
         d3d11cfg.D3D11.Header.Multisample = 1;
@@ -277,7 +278,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
 
         // Animate the cube
         roomScene.Models[0]->Pos =
-            Vector3f(9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock));
+            Vector3f{9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock)};
 
         // Get both eye poses simultaneously, with IPD offset already included.
         ovrPosef eyePoses[2] = {};
@@ -293,8 +294,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
             // Get view and projection matrices (note near Z to reduce eye strain)
             const Matrix4f rollPitchYaw = Matrix4f::RotationY(Yaw);
             const Matrix4f finalRollPitchYaw = rollPitchYaw * Matrix4f(useEyePose.Orientation);
-            const Vector3f finalUp = finalRollPitchYaw.Transform(Vector3f(0, 1, 0));
-            const Vector3f finalForward = finalRollPitchYaw.Transform(Vector3f(0, 0, -1));
+            const Vector3f finalUp = finalRollPitchYaw.Transform(Vector3f{0, 1, 0});
+            const Vector3f finalForward = finalRollPitchYaw.Transform(Vector3f{0, 0, -1});
             const Vector3f shiftedEyePos = Pos + rollPitchYaw.Transform(useEyePose.Position);
 
             const Matrix4f view =
@@ -338,17 +339,17 @@ EyeTarget::EyeTarget(ID3D11Device* device, Sizei requestedSize) {
     device->CreateTexture2D(&texDesc, nullptr, &tex);
     device->CreateShaderResourceView(tex, nullptr, &srv);
     device->CreateRenderTargetView(tex, nullptr, &rtv);
-    tex->GetDesc(&texDesc); // Get the actual size in case it was adjusted on create
+    tex->GetDesc(&texDesc);  // Get the actual size in case it was adjusted on create
     size = Sizei(texDesc.Width, texDesc.Height);
 
-    CD3D11_TEXTURE2D_DESC dsDesc(DXGI_FORMAT_D32_FLOAT, texDesc.Width, texDesc.Height);
+    CD3D11_TEXTURE2D_DESC dsDesc{DXGI_FORMAT_D32_FLOAT, texDesc.Width, texDesc.Height};
     dsDesc.MipLevels = 1;
     dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ID3D11Texture2DPtr dsTex;
     device->CreateTexture2D(&dsDesc, nullptr, &dsTex);
     device->CreateDepthStencilView(dsTex, nullptr, &dsv);
 
-    viewport.Pos = Vector2i(0, 0);
+    viewport.Pos = Vector2i{0, 0};
     viewport.Size = Sizei(texDesc.Width, texDesc.Height);
 }
 
@@ -382,7 +383,7 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProc(arg_hwnd, msg, wp, lp);
 }
 
-DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
+DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
     fill(begin(Key), end(Key), false);
 
     Window = [this, vp] {
@@ -394,7 +395,7 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
 
         const DWORD wsStyle = WS_POPUP | WS_OVERLAPPEDWINDOW;
         const auto sizeDivisor = 2;
-        RECT winSize = {0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
+        RECT winSize{0, 0, vp.w / sizeDivisor, vp.h / sizeDivisor};
         AdjustWindowRect(&winSize, wsStyle, false);
         return CreateWindowW(className, L"OculusRoomTiny", wsStyle | WS_VISIBLE, vp.x, vp.y,
                              winSize.right - winSize.left, winSize.bottom - winSize.top, nullptr,
@@ -411,9 +412,9 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         ThrowOnFailure(DXGIFactory->EnumAdapters(0, &Adapter));
 
         const UINT creationFlags =
-#ifdef _DEBUG 
+#ifdef _DEBUG
             D3D11_CREATE_DEVICE_DEBUG;
-#else 
+#else
             0u;
 #endif
 
@@ -443,8 +444,8 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
     }(SwapChain, Device, &BackBufferRT);
 
     [](ID3D11Device* device, ID3D11Buffer** uniformBuffer) {
-        CD3D11_BUFFER_DESC desc(2000, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC,
-                                D3D11_CPU_ACCESS_WRITE);
+        CD3D11_BUFFER_DESC desc{2000u, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC,
+                                D3D11_CPU_ACCESS_WRITE};
         ThrowOnFailure(device->CreateBuffer(&desc, nullptr, uniformBuffer));
     }(Device, &UniformBufferGen);
 
@@ -555,7 +556,7 @@ void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     Context->OMSetRenderTargets(1, rtvs, eyeTarget.dsv);
     Context->ClearRenderTargetView(eyeTarget.rtv, black);
     Context->ClearDepthStencilView(eyeTarget.dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
-    D3D11_VIEWPORT d3dvp;
+    D3D11_VIEWPORT d3dvp{};
     d3dvp.TopLeftX = static_cast<float>(eyeTarget.viewport.Pos.x);
     d3dvp.TopLeftY = static_cast<float>(eyeTarget.viewport.Pos.y);
     d3dvp.Width = static_cast<float>(eyeTarget.viewport.Size.w);
