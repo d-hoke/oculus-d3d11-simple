@@ -483,12 +483,13 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
 
         const char* VertexShaderSrc = R"(
         float4x4 Proj, View;
-        void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0,
-                  out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0)
+        void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0, 
+                  out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0, 
+                  out float3 worldPos : TEXCOORD1)
         {
-            oPosition = mul(Proj, mul(View, Position)); 
-            oTexCoord = TexCoord; 
-            oColor = Color; 
+            oPosition = mul(Proj, mul(View, Position));
+            oTexCoord = TexCoord; oColor = Color;
+            worldPos = Position;
         })";
 
         ID3DBlobPtr blobData;
@@ -520,10 +521,17 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
     [](ID3D11Device* device, ID3D11PixelShader** pixelShader) {
         const char* PixelShaderSrc = R"(
         Texture2D Texture : register(t0);
-        SamplerState Linear : register(s0); 
-        float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0) : SV_Target
+        SamplerState Linear : register(s0);
+        float4 main(in float4 Position : SV_Position, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0, 
+                    in float3 worldPos : TEXCOORD1) : SV_Target
         {
-            return Color * Texture.Sample(Linear, TexCoord);
+            float3 tan = ddx(worldPos);
+            float3 bin = ddy(worldPos);
+            float3 n = normalize(cross(bin, tan));
+            float3 l = float3(0, 3.7, 0) - worldPos;
+            float r = length(l);
+            float d = dot(n, l / r);
+            return Color * (0.5 + 10 * d/r) * Texture.Sample(Linear, TexCoord);
         })";
 
         ID3DBlobPtr blobData;
@@ -634,14 +642,7 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
         vvv.Pos = Vert[v][0];
         vvv.U = Vert[v][1].x;
         vvv.V = Vert[v][1].y;
-        const float dist1 = (vvv.Pos - Vector3f(-2, 4, -2)).Length();
-        const float dist2 = (vvv.Pos - Vector3f(3, 4, -3)).Length();
-        const float dist3 = (vvv.Pos - Vector3f(-4, 3, 25)).Length();
-        const int bri = rand() % 160;
-        const float mod = (bri + 192.0f * (0.65f + 8 / dist1 + 1 / dist2 + 4 / dist3)) / 255.0f;
-        vvv.C.R = static_cast<unsigned char>(min(c.R * mod, 255.0f));
-        vvv.C.G = static_cast<unsigned char>(min(c.G * mod, 255.0f));
-        vvv.C.B = static_cast<unsigned char>(min(c.B * mod, 255.0f));
+        vvv.C = c;
         Vertices.push_back(vvv);
     }
 }
