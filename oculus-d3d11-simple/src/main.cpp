@@ -82,19 +82,19 @@ struct EyeTarget {
 
 struct DirectX11 {
     HINSTANCE hinst = nullptr;
-    HWND Window = nullptr;
-    array<bool, 256> Key;
-    ID3D11DevicePtr Device;
-    ID3D11DeviceContextPtr Context;
-    IDXGISwapChainPtr SwapChain;
-    ID3D11RenderTargetViewPtr BackBufferRT;
-    ID3D11BufferPtr UniformBufferGen;
-    ID3D11SamplerStatePtr SamplerState;
-    ID3D11VertexShaderPtr VShader;
-    vector<unsigned char> UniformData;
-    unordered_map<string, int> UniformOffsets;
-    ID3D11PixelShaderPtr PShader;
-    ID3D11InputLayoutPtr InputLayout;
+    HWND window = nullptr;
+    array<bool, 256> keys;
+    ID3D11DevicePtr device;
+    ID3D11DeviceContextPtr context;
+    IDXGISwapChainPtr swapChain;
+    ID3D11RenderTargetViewPtr backBufferRT;
+    ID3D11BufferPtr uniformBufferGen;
+    ID3D11SamplerStatePtr samplerState;
+    ID3D11VertexShaderPtr vShader;
+    vector<unsigned char> uniformData;
+    unordered_map<string, int> uniformOffsets;
+    ID3D11PixelShaderPtr pShader;
+    ID3D11InputLayoutPtr inputLayout;
 
     DirectX11(HINSTANCE hinst, const Recti& vp);
     ~DirectX11();
@@ -194,7 +194,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
     DirectX11 DX11{hinst, Recti{hmd->WindowsPos, hmd->Resolution}};
 
     // Attach HMD to window and initialize tracking
-    throwOnError(ovrHmd_AttachToWindow(hmd.get(), DX11.Window, nullptr, nullptr), hmd.get());
+    throwOnError(ovrHmd_AttachToWindow(hmd.get(), DX11.window, nullptr, nullptr), hmd.get());
     ovrHmd_SetEnabledCaps(hmd.get(), ovrHmdCap_LowPersistence | ovrHmdCap_DynamicPrediction);
     throwOnError(ovrHmd_ConfigureTracking(hmd.get(), ovrTrackingCap_Orientation |
                                                          ovrTrackingCap_MagYawCorrection |
@@ -204,9 +204,9 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
 
     // Create the eye render targets.
     const EyeTarget eyeTargets[] = {
-        {DX11.Device,
+        {DX11.device,
          ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Left, hmd->DefaultEyeFov[ovrEye_Left], 1.0f)},
-        {DX11.Device, ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Right,
+        {DX11.device, ovrHmd_GetFovTextureSize(hmd.get(), ovrEye_Right,
                                                hmd->DefaultEyeFov[ovrEye_Right], 1.0f)}};
 
     // Configure SDK rendering
@@ -215,23 +215,23 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         d3d11cfg.D3D11.Header.API = ovrRenderAPI_D3D11;
         d3d11cfg.D3D11.Header.BackBufferSize = hmd->Resolution;
         d3d11cfg.D3D11.Header.Multisample = 1;
-        d3d11cfg.D3D11.pDevice = DX11.Device;
-        d3d11cfg.D3D11.pDeviceContext = DX11.Context;
-        d3d11cfg.D3D11.pBackBufferRT = DX11.BackBufferRT;
-        d3d11cfg.D3D11.pSwapChain = DX11.SwapChain;
+        d3d11cfg.D3D11.pDevice = DX11.device;
+        d3d11cfg.D3D11.pDeviceContext = DX11.context;
+        d3d11cfg.D3D11.pBackBufferRT = DX11.backBufferRT;
+        d3d11cfg.D3D11.pSwapChain = DX11.swapChain;
 
-        array<ovrEyeRenderDesc, 2> eyeRenderDesc;
+        array<ovrEyeRenderDesc, 2> res;
         throwOnError(
             ovrHmd_ConfigureRendering(hmd.get(), &d3d11cfg.Config,
                                       ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette |
                                           ovrDistortionCap_TimeWarp | ovrDistortionCap_Overdrive,
-                                      hmd->DefaultEyeFov, &eyeRenderDesc[0]),
+                                      hmd->DefaultEyeFov, &res[0]),
             hmd.get());
-        return eyeRenderDesc;
+        return res;
     }();
 
     // Create the room models
-    Scene roomScene{DX11.Device, DX11.Context};
+    Scene roomScene{DX11.device, DX11.context};
 
     float Yaw = 3.141592f;            // Horizontal rotation of the player
     Vector3f Pos{0.0f, 1.6f, -5.0f};  // Position of player
@@ -240,7 +240,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
     // =========
     int appClock = 0;
 
-    while (!(DX11.Key['Q'] && DX11.Key[VK_CONTROL]) && !DX11.Key[VK_ESCAPE]) {
+    while (!(DX11.keys['Q'] && DX11.keys[VK_CONTROL]) && !DX11.keys[VK_ESCAPE]) {
         ++appClock;
 
         MSG msg{};
@@ -256,23 +256,23 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         ovrHmd_BeginFrame(hmd.get(), 0);
 
         // Recenter the Rift by pressing 'R'
-        if (DX11.Key['R']) ovrHmd_RecenterPose(hmd.get());
+        if (DX11.keys['R']) ovrHmd_RecenterPose(hmd.get());
 
         // Dismiss the Health and Safety message by pressing any key
         if (DX11.IsAnyKeyPressed()) ovrHmd_DismissHSWDisplay(hmd.get());
 
         // Keyboard inputs to adjust player orientation
-        if (DX11.Key[VK_LEFT]) Yaw += 0.02f;
-        if (DX11.Key[VK_RIGHT]) Yaw -= 0.02f;
+        if (DX11.keys[VK_LEFT]) Yaw += 0.02f;
+        if (DX11.keys[VK_RIGHT]) Yaw -= 0.02f;
 
         // Keyboard inputs to adjust player position
-        if (DX11.Key['W'] || DX11.Key[VK_UP])
+        if (DX11.keys['W'] || DX11.keys[VK_UP])
             Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, -speed * 0.05f));
-        if (DX11.Key['S'] || DX11.Key[VK_DOWN])
+        if (DX11.keys['S'] || DX11.keys[VK_DOWN])
             Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(0, 0, +speed * 0.05f));
-        if (DX11.Key['D'])
+        if (DX11.keys['D'])
             Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(+speed * 0.05f, 0, 0));
-        if (DX11.Key['A'])
+        if (DX11.keys['A'])
             Pos += Matrix4f::RotationY(Yaw).Transform(Vector3f(-speed * 0.05f, 0, 0));
         Pos.y = ovrHmd_GetFloat(hmd.get(), OVR_KEY_EYE_HEIGHT, Pos.y);
 
@@ -361,18 +361,18 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
             CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lp);
             if (createStruct->lpCreateParams) {
                 dx11 = reinterpret_cast<DirectX11*>(createStruct->lpCreateParams);
-                dx11->Window = arg_hwnd;
+                dx11->window = arg_hwnd;
             }
             break;
         }
         case WM_KEYDOWN:
-            if (dx11) dx11->Key[(unsigned)wp] = true;
+            if (dx11) dx11->keys[(unsigned)wp] = true;
             break;
         case WM_KEYUP:
-            if (dx11) dx11->Key[(unsigned)wp] = false;
+            if (dx11) dx11->keys[(unsigned)wp] = false;
             break;
         case WM_SETFOCUS:
-            SetCapture(dx11->Window);
+            SetCapture(dx11->window);
             ShowCursor(FALSE);
             break;
         case WM_KILLFOCUS:
@@ -384,9 +384,9 @@ LRESULT CALLBACK SystemWindowProc(HWND arg_hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
-    fill(begin(Key), end(Key), false);
+    fill(begin(keys), end(keys), false);
 
-    Window = [this, vp] {
+    window = [this, vp] {
         const auto className = L"OVRAppWindow";
         WNDCLASSW wc{};
         wc.lpszClassName = className;
@@ -402,8 +402,8 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
                              nullptr, hinst, this);
     }();
 
-    [vp](HWND hwnd, IDXGISwapChain** swapChain, ID3D11Device** device,
-         ID3D11DeviceContext** context) {
+    [vp](HWND hwnd, IDXGISwapChain** sc, ID3D11Device** dev,
+         ID3D11DeviceContext** ctx) {
         IDXGIFactoryPtr DXGIFactory;
         ThrowOnFailure(
             CreateDXGIFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&DXGIFactory)));
@@ -432,47 +432,47 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
 
         ThrowOnFailure(D3D11CreateDeviceAndSwapChain(
             Adapter, Adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
-            creationFlags, nullptr, 0, D3D11_SDK_VERSION, &scDesc, swapChain, device, nullptr,
-            context));
-    }(Window, &SwapChain, &Device, &Context);
+            creationFlags, nullptr, 0, D3D11_SDK_VERSION, &scDesc, sc, dev, nullptr,
+            ctx));
+    }(window, &swapChain, &device, &context);
 
-    [](IDXGISwapChain* swapChain, ID3D11Device* device, ID3D11RenderTargetView** backBufferRtv) {
+    [](IDXGISwapChain* sc, ID3D11Device* dev, ID3D11RenderTargetView** backBufferRtv) {
         ID3D11Texture2DPtr backBuffer;
-        ThrowOnFailure(swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D),
+        ThrowOnFailure(sc->GetBuffer(0, __uuidof(ID3D11Texture2D),
                                             reinterpret_cast<void**>(&backBuffer)));
-        ThrowOnFailure(device->CreateRenderTargetView(backBuffer, nullptr, backBufferRtv));
-    }(SwapChain, Device, &BackBufferRT);
+        ThrowOnFailure(dev->CreateRenderTargetView(backBuffer, nullptr, backBufferRtv));
+    }(swapChain, device, &backBufferRT);
 
-    [](ID3D11Device* device, ID3D11Buffer** uniformBuffer) {
+    [](ID3D11Device* dev, ID3D11Buffer** uniformBuffer) {
         CD3D11_BUFFER_DESC desc{2000u, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC,
                                 D3D11_CPU_ACCESS_WRITE};
-        ThrowOnFailure(device->CreateBuffer(&desc, nullptr, uniformBuffer));
-    }(Device, &UniformBufferGen);
+        ThrowOnFailure(dev->CreateBuffer(&desc, nullptr, uniformBuffer));
+    }(device, &uniformBufferGen);
 
-    [](ID3D11Device* device, ID3D11DeviceContext* context) {
+    [](ID3D11Device* dev, ID3D11DeviceContext* ctx) {
         CD3D11_RASTERIZER_DESC rs{D3D11_DEFAULT};
         ID3D11RasterizerStatePtr rasterizerState;
-        ThrowOnFailure(device->CreateRasterizerState(&rs, &rasterizerState));
-        context->RSSetState(rasterizerState);
-    }(Device, Context);
+        ThrowOnFailure(dev->CreateRasterizerState(&rs, &rasterizerState));
+        ctx->RSSetState(rasterizerState);
+    }(device, context);
 
-    [](ID3D11Device* device, ID3D11DeviceContext* context) {
+    [](ID3D11Device* dev, ID3D11DeviceContext* ctx) {
         CD3D11_DEPTH_STENCIL_DESC dss{D3D11_DEFAULT};
         ID3D11DepthStencilStatePtr depthStencilState;
-        ThrowOnFailure(device->CreateDepthStencilState(&dss, &depthStencilState));
-        context->OMSetDepthStencilState(depthStencilState, 0);
-    }(Device, Context);
+        ThrowOnFailure(dev->CreateDepthStencilState(&dss, &depthStencilState));
+        ctx->OMSetDepthStencilState(depthStencilState, 0);
+    }(device, context);
 
-    [](ID3D11Device* device, ID3D11SamplerState** samplerState) {
-        CD3D11_SAMPLER_DESC ss{D3D11_DEFAULT};
-        ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-        ss.Filter = D3D11_FILTER_ANISOTROPIC;
-        ss.MaxAnisotropy = 8;
-        device->CreateSamplerState(&ss, samplerState);
-    }(Device, &SamplerState);
+    [](ID3D11Device* dev, ID3D11SamplerState** ss) {
+        CD3D11_SAMPLER_DESC ssd{D3D11_DEFAULT};
+        ssd.AddressU = ssd.AddressV = ssd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+        ssd.Filter = D3D11_FILTER_ANISOTROPIC;
+        ssd.MaxAnisotropy = 8;
+        dev->CreateSamplerState(&ssd, ss);
+    }(device, &samplerState);
 
-    [this](ID3D11Device* device, ID3D11VertexShader** vertexShader,
-           ID3D11InputLayout** inputLayout) {
+    [this](ID3D11Device* dev, ID3D11VertexShader** vertexShader,
+           ID3D11InputLayout** il) {
         D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
             {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
              D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -499,7 +499,7 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
         ThrowOnFailure(D3DCompile(VertexShaderSrc, strlen(VertexShaderSrc), nullptr, nullptr,
                                   nullptr, "main", "vs_4_0", 0, 0, &blobData, nullptr));
 
-        ThrowOnFailure(device->CreateVertexShader(blobData->GetBufferPointer(),
+        ThrowOnFailure(dev->CreateVertexShader(blobData->GetBufferPointer(),
                                                   blobData->GetBufferSize(), NULL, vertexShader));
 
         ID3D11ShaderReflectionPtr ref;
@@ -513,15 +513,15 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
             ID3D11ShaderReflectionVariable* var = buf->GetVariableByIndex(i);
             D3D11_SHADER_VARIABLE_DESC vd{};
             var->GetDesc(&vd);
-            UniformOffsets[vd.Name] = vd.StartOffset;
+            uniformOffsets[vd.Name] = vd.StartOffset;
         }
-        UniformData.resize(bufd.Size);
+        uniformData.resize(bufd.Size);
 
         device->CreateInputLayout(ModelVertexDesc, 3, blobData->GetBufferPointer(),
-                                  blobData->GetBufferSize(), inputLayout);
-    }(Device, &VShader, &InputLayout);
+                                  blobData->GetBufferSize(), il);
+    }(device, &vShader, &inputLayout);
 
-    [](ID3D11Device* device, ID3D11PixelShader** pixelShader) {
+    [](ID3D11Device* dev, ID3D11PixelShader** pixelShader) {
         const char* PixelShaderSrc = R"(
         Texture2D Texture : register(t0);
         SamplerState Linear : register(s0);
@@ -540,22 +540,22 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
         ID3DBlobPtr blobData;
         ThrowOnFailure(D3DCompile(PixelShaderSrc, strlen(PixelShaderSrc), nullptr, nullptr, nullptr,
                                   "main", "ps_4_0", 0, 0, &blobData, nullptr));
-        ThrowOnFailure(device->CreatePixelShader(blobData->GetBufferPointer(),
+        ThrowOnFailure(dev->CreatePixelShader(blobData->GetBufferPointer(),
                                                  blobData->GetBufferSize(), nullptr, pixelShader));
-    }(Device, &PShader);
+    }(device, &pShader);
 }
 
 DirectX11::~DirectX11() {
-    DestroyWindow(Window);
+    DestroyWindow(window);
     UnregisterClassW(L"OVRAppWindow", hinst);
 }
 
 void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     const float black[] = {0.f, 0.f, 0.f, 1.f};
     ID3D11RenderTargetView* rtvs[] = {eyeTarget.rtv};
-    Context->OMSetRenderTargets(1, rtvs, eyeTarget.dsv);
-    Context->ClearRenderTargetView(eyeTarget.rtv, black);
-    Context->ClearDepthStencilView(eyeTarget.dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
+    context->OMSetRenderTargets(1, rtvs, eyeTarget.dsv);
+    context->ClearRenderTargetView(eyeTarget.rtv, black);
+    context->ClearDepthStencilView(eyeTarget.dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
     D3D11_VIEWPORT d3dvp{};
     d3dvp.TopLeftX = static_cast<float>(eyeTarget.viewport.Pos.x);
     d3dvp.TopLeftY = static_cast<float>(eyeTarget.viewport.Pos.y);
@@ -563,44 +563,44 @@ void DirectX11::ClearAndSetEyeTarget(const EyeTarget& eyeTarget) {
     d3dvp.Height = static_cast<float>(eyeTarget.viewport.Size.h);
     d3dvp.MinDepth = 0.f;
     d3dvp.MaxDepth = 1.f;
-    Context->RSSetViewports(1, &d3dvp);
+    context->RSSetViewports(1, &d3dvp);
 }
 
 void DirectX11::Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
                        ID3D11Buffer* indices, UINT stride, int count) {
-    Context->IASetInputLayout(InputLayout);
-    Context->IASetIndexBuffer(indices, DXGI_FORMAT_R16_UINT, 0);
+    context->IASetInputLayout(inputLayout);
+    context->IASetIndexBuffer(indices, DXGI_FORMAT_R16_UINT, 0);
 
     UINT offset = 0;
     ID3D11Buffer* vertexBuffers[] = {vertices};
-    Context->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
+    context->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
 
     D3D11_MAPPED_SUBRESOURCE map;
-    Context->Map(UniformBufferGen, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
-    memcpy(map.pData, UniformData.data(), UniformData.size());
-    Context->Unmap(UniformBufferGen, 0);
+    context->Map(uniformBufferGen, 0, D3D11_MAP_WRITE_DISCARD, 0, &map);
+    memcpy(map.pData, uniformData.data(), uniformData.size());
+    context->Unmap(uniformBufferGen, 0);
 
-    ID3D11Buffer* vsConstantBuffers[] = {UniformBufferGen};
-    Context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
+    ID3D11Buffer* vsConstantBuffers[] = {uniformBufferGen};
+    context->VSSetConstantBuffers(0, 1, vsConstantBuffers);
 
-    Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    Context->VSSetShader(VShader, nullptr, 0);
-    Context->PSSetShader(PShader, nullptr, 0);
-    ID3D11SamplerState* samplerStates[] = {SamplerState};
-    Context->PSSetSamplers(0, 1, samplerStates);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(vShader, nullptr, 0);
+    context->PSSetShader(pShader, nullptr, 0);
+    ID3D11SamplerState* samplerStates[] = {samplerState};
+    context->PSSetSamplers(0, 1, samplerStates);
     if (texSrv) {
         ID3D11ShaderResourceView* srvs[] = {texSrv};
-        Context->PSSetShaderResources(0, 1, srvs);
+        context->PSSetShaderResources(0, 1, srvs);
     }
-    Context->DrawIndexed(count, 0, 0);
+    context->DrawIndexed(count, 0, 0);
 }
 
 bool DirectX11::IsAnyKeyPressed() const {
-    return any_of(begin(Key), end(Key), [](bool b) { return b; });
+    return any_of(begin(keys), end(keys), [](bool b) { return b; });
 }
 
 void DirectX11::SetUniform(const char* name, int n, const float* v) {
-    memcpy(UniformData.data() + UniformOffsets[name], v, n * sizeof(float));
+    memcpy(uniformData.data() + uniformOffsets[name], v, n * sizeof(float));
 }
 
 void Model::AllocateBuffers(ID3D11Device* device) {
