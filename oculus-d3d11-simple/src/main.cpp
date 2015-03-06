@@ -137,7 +137,7 @@ struct Scene {
 
     Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext);
 
-    void Render(DirectX11& dx11, Matrix4f view, Matrix4f proj);
+    void Render(DirectX11& dx11, const Matrix4f& view, const Matrix4f& proj);
 };
 
 void throwOnError(ovrBool res, ovrHmd hmd = nullptr) {
@@ -303,7 +303,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
                 ovrMatrix4f_Projection(eyeRenderDesc[eye].Fov, 0.2f, 1000.0f, true);
 
             // Render the scene
-            roomScene.Render(DX11, view, proj.Transposed());
+            roomScene.Render(DX11, view, proj);
         }
 
         // Do distortion rendering, Present and flush/sync
@@ -482,14 +482,16 @@ DirectX11::DirectX11(HINSTANCE hinst_, Recti vp) : hinst(hinst_) {
         };
 
         const char* VertexShaderSrc = R"(
-        float4x4 Proj, View;
+        float4x4 Proj, View, World;
         void main(in float4 Position : POSITION, in float4 Color : COLOR0, in float2 TexCoord : TEXCOORD0, 
                   out float4 oPosition : SV_Position, out float4 oColor : COLOR0, out float2 oTexCoord : TEXCOORD0, 
-                  out float3 worldPos : TEXCOORD1)
+                  out float3 oWorldPos : TEXCOORD1)
         {
-            oPosition = mul(Proj, mul(View, Position));
-            oTexCoord = TexCoord; oColor = Color;
-            worldPos = Position;
+            float4 wp = mul(World, Position);
+            oPosition = mul(Proj, mul(View, wp));
+            oColor = Color;
+            oTexCoord = TexCoord;
+            oWorldPos = wp;
         })";
 
         ID3DBlobPtr blobData;
@@ -786,13 +788,11 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
     Models.emplace_back(move(m));
 }
 
-void Scene::Render(DirectX11& dx11, Matrix4f view, Matrix4f proj) {
+void Scene::Render(DirectX11& dx11, const Matrix4f& view, const Matrix4f& proj) {
+    dx11.SetUniform("Proj", 16, &proj.Transposed().M[0][0]);
+    dx11.SetUniform("View", 16, &view.Transposed().M[0][0]);
     for (auto& model : Models) {
-        Matrix4f modelView = (view * model->GetMatrix()).Transposed();
-
-        dx11.SetUniform("View", 16, &modelView.M[0][0]);
-        dx11.SetUniform("Proj", 16, &proj.M[0][0]);
-
+        dx11.SetUniform("World", 16, &model->GetMatrix().Transposed().M[0][0]);
         dx11.Render(model->textureSrv, model->VertexBuffer, model->IndexBuffer,
                     sizeof(Model::Vertex), model->Indices.size());
     }
