@@ -107,34 +107,34 @@ struct DirectX11 {
 
 struct Model {
     struct Color {
-        unsigned char R, G, B, A;
+        unsigned char r, g, b, a;
 
-        Color(unsigned char r = 0, unsigned char g = 0, unsigned char b = 0, unsigned char a = 0xff)
-            : R{r}, G{g}, B{b}, A{a} {}
+        Color(unsigned char r_ = 0, unsigned char g_ = 0, unsigned char b_ = 0, unsigned char a_ = 0xff)
+            : r{r_}, g{g_}, b{b_}, a{a_} {}
     };
     struct Vertex {
-        Vector3f Pos;
-        Color C;
-        float U, V;
+        Vector3f pos;
+        Color c;
+        float u, v;
     };
 
-    Vector3f Pos;
-    vector<Vertex> Vertices;
-    vector<uint16_t> Indices;
-    ID3D11BufferPtr VertexBuffer;
-    ID3D11BufferPtr IndexBuffer;
+    Vector3f pos;
+    vector<Vertex> vertices;
+    vector<uint16_t> indices;
+    ID3D11BufferPtr vertexBuffer;
+    ID3D11BufferPtr indexBuffer;
     ID3D11ShaderResourceViewPtr textureSrv;
 
-    Model(Vector3f pos_, ID3D11ShaderResourceView* texSrv) : Pos{pos_}, textureSrv{texSrv} {}
+    Model(Vector3f pos_, ID3D11ShaderResourceView* texSrv) : pos{pos_}, textureSrv{texSrv} {}
 
-    Matrix4f GetMatrix() { return Matrix4f::Translation(Pos); }
+    Matrix4f GetMatrix() { return Matrix4f::Translation(pos); }
     void AllocateBuffers(ID3D11Device* device);
     void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2,
                                  Color c);
 };
 
 struct Scene {
-    vector<unique_ptr<Model>> Models;
+    vector<unique_ptr<Model>> models;
 
     Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext);
 
@@ -277,7 +277,7 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         Pos.y = ovrHmd_GetFloat(hmd.get(), OVR_KEY_EYE_HEIGHT, Pos.y);
 
         // Animate the cube
-        roomScene.Models[0]->Pos =
+        roomScene.models[0]->pos =
             Vector3f{9 * sin(0.01f * appClock), 3, 9 * cos(0.01f * appClock)};
 
         // Get both eye poses simultaneously, with IPD offset already included.
@@ -474,11 +474,11 @@ DirectX11::DirectX11(HINSTANCE hinst_, const Recti& vp) : hinst{hinst_} {
     [this](ID3D11Device* dev, ID3D11VertexShader** vertexShader,
            ID3D11InputLayout** il) {
         D3D11_INPUT_ELEMENT_DESC ModelVertexDesc[] = {
-            {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, Pos),
+            {"Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Model::Vertex, pos),
              D3D11_INPUT_PER_VERTEX_DATA, 0},
-            {"Color", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, offsetof(Model::Vertex, C),
+            {"Color", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, offsetof(Model::Vertex, c),
              D3D11_INPUT_PER_VERTEX_DATA, 0},
-            {"TexCoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Model::Vertex, U),
+            {"TexCoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Model::Vertex, u),
              D3D11_INPUT_PER_VERTEX_DATA, 0},
         };
 
@@ -606,15 +606,15 @@ void DirectX11::SetUniform(const char* name, int n, const float* v) {
 void Model::AllocateBuffers(ID3D11Device* device) {
     D3D11_SUBRESOURCE_DATA sr{};
 
-    const CD3D11_BUFFER_DESC vbdesc(Vertices.size() * sizeof(Vertices[0]), D3D11_BIND_VERTEX_BUFFER,
+    const CD3D11_BUFFER_DESC vbdesc(vertices.size() * sizeof(vertices[0]), D3D11_BIND_VERTEX_BUFFER,
                                     D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
-    sr.pSysMem = Vertices.data();
-    ThrowOnFailure(device->CreateBuffer(&vbdesc, &sr, &VertexBuffer));
+    sr.pSysMem = vertices.data();
+    ThrowOnFailure(device->CreateBuffer(&vbdesc, &sr, &vertexBuffer));
 
-    const CD3D11_BUFFER_DESC ibdesc(Indices.size() * sizeof(Indices[0]), D3D11_BIND_INDEX_BUFFER,
+    const CD3D11_BUFFER_DESC ibdesc(indices.size() * sizeof(indices[0]), D3D11_BIND_INDEX_BUFFER,
                                     D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
-    sr.pSysMem = Indices.data();
-    ThrowOnFailure(device->CreateBuffer(&ibdesc, &sr, &IndexBuffer));
+    sr.pSysMem = indices.data();
+    ThrowOnFailure(device->CreateBuffer(&ibdesc, &sr, &indexBuffer));
 }
 
 void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, float z2, Color c) {
@@ -622,8 +622,8 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
                                     8,  9,  11, 11, 9,  10, 13, 12, 14, 14, 12, 15,
                                     16, 17, 19, 19, 17, 18, 21, 20, 22, 22, 20, 23};
 
-    const uint16_t offset = static_cast<uint16_t>(Vertices.size());
-    for (const auto& index : CubeIndices) Indices.push_back(index + offset);
+    const uint16_t offset = static_cast<uint16_t>(vertices.size());
+    for (const auto& index : CubeIndices) indices.push_back(index + offset);
 
     const Vector3f Vert[][2] = {
         Vector3f(x1, y2, z1), Vector3f(z1, x1), Vector3f(x2, y2, z1), Vector3f(z1, x2),
@@ -642,11 +642,11 @@ void Model::AddSolidColorBox(float x1, float y1, float z1, float x2, float y2, f
 
     for (int v = 0; v < 24; ++v) {
         Vertex vvv;
-        vvv.Pos = Vert[v][0];
-        vvv.U = Vert[v][1].x;
-        vvv.V = Vert[v][1].y;
-        vvv.C = c;
-        Vertices.push_back(vvv);
+        vvv.pos = Vert[v][0];
+        vvv.u = Vert[v][1].x;
+        vvv.v = Vert[v][1].y;
+        vvv.c = c;
+        vertices.push_back(vvv);
     }
 }
 
@@ -708,7 +708,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
                 wh >>= 1;
             }
             return texSrv;
-        }(&tex_pixels[0].R);
+        }(&tex_pixels[0].r);
     }
 
     // Construct geometry
@@ -716,7 +716,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
         make_unique<Model>(Vector3f(0, 0, 0), generated_texture[2]);  // Moving box
     m->AddSolidColorBox(0, 0, 0, +1.0f, +1.0f, 1.0f, Model::Color(64, 64, 64));
     m->AllocateBuffers(device);
-    Models.emplace_back(move(m));
+    models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[1]);  // Walls
     m->AddSolidColorBox(-10.1f, 0.0f, -20.0f, -10.0f, 4.0f, 20.0f,
@@ -726,7 +726,7 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
     m->AddSolidColorBox(10.0f, -0.1f, -20.0f, 10.1f, 4.0f, 20.0f,
                         Model::Color(128, 128, 128));  // Right Wall
     m->AllocateBuffers(device);
-    Models.emplace_back(move(m));
+    models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[0]);  // Floors
     m->AddSolidColorBox(-10.0f, -0.1f, -20.0f, 10.0f, 0.0f, 20.1f,
@@ -734,12 +734,12 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
     m->AddSolidColorBox(-15.0f, -6.1f, 18.0f, 15.0f, -6.0f, 30.0f,
                         Model::Color(128, 128, 128));  // Bottom floor
     m->AllocateBuffers(device);
-    Models.emplace_back(move(m));
+    models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[4]);  // Ceiling
     m->AddSolidColorBox(-10.0f, 4.0f, -20.0f, 10.0f, 4.1f, 20.1f, Model::Color(128, 128, 128));
     m->AllocateBuffers(device);
-    Models.emplace_back(move(m));
+    models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[3]);  // Fixtures & furniture
     m->AddSolidColorBox(9.5f, 0.75f, 3.0f, 10.1f, 2.5f, 3.1f,
@@ -786,15 +786,15 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
         m->AddSolidColorBox(-3, 0.0f, f, -2.9f, 1.3f, f + 0.1f, Model::Color(64, 64, 64));  // Posts
 
     m->AllocateBuffers(device);
-    Models.emplace_back(move(m));
+    models.emplace_back(move(m));
 }
 
 void Scene::Render(DirectX11& dx11, const Matrix4f& view, const Matrix4f& proj) {
     dx11.SetUniform("Proj", 16, &proj.Transposed().M[0][0]);
     dx11.SetUniform("View", 16, &view.Transposed().M[0][0]);
-    for (auto& model : Models) {
+    for (auto& model : models) {
         dx11.SetUniform("World", 16, &model->GetMatrix().Transposed().M[0][0]);
-        dx11.Render(model->textureSrv, model->VertexBuffer, model->IndexBuffer,
-                    sizeof(Model::Vertex), model->Indices.size());
+        dx11.Render(model->textureSrv, model->vertexBuffer, model->indexBuffer,
+                    sizeof(Model::Vertex), model->indices.size());
     }
 }
