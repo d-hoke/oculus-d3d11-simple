@@ -101,7 +101,6 @@ struct DirectX11 {
     void ClearAndSetEyeTarget(const EyeTarget& eyeTarget);
     void Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices, ID3D11Buffer* indices,
                 UINT stride, int count);
-    bool IsAnyKeyPressed() const;
     void SetUniform(const char* name, int n, const float* v);
 };
 
@@ -113,6 +112,7 @@ struct Model {
               unsigned char a_ = 0xff)
             : r{r_}, g{g_}, b{b_}, a{a_} {}
     };
+
     struct Vertex {
         Vector3f pos;
         Color c;
@@ -260,7 +260,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE, LPSTR /*args*/, int) {
         if (dx11.keys['R']) ovrHmd_RecenterPose(hmd.get());
 
         // Dismiss the Health and Safety message by pressing any key
-        if (dx11.IsAnyKeyPressed()) ovrHmd_DismissHSWDisplay(hmd.get());
+        if (any_of(begin(dx11.keys), end(dx11.keys), [](bool b) { return b; }))
+            ovrHmd_DismissHSWDisplay(hmd.get());
 
         // Keyboard inputs to adjust player orientation
         if (dx11.keys[VK_LEFT]) yaw += 0.02f;
@@ -593,10 +594,6 @@ void DirectX11::Render(ID3D11ShaderResourceView* texSrv, ID3D11Buffer* vertices,
     context->DrawIndexed(count, 0, 0);
 }
 
-bool DirectX11::IsAnyKeyPressed() const {
-    return any_of(begin(keys), end(keys), [](bool b) { return b; });
-}
-
 void DirectX11::SetUniform(const char* name, int n, const float* v) {
     memcpy(uniformData.data() + uniformOffsets[name], v, n * sizeof(float));
 }
@@ -660,20 +657,20 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
             for (int i = 0; i < texWidthHeight; ++i) {
                 if (k == 0)
                     tex_pixels[j * texWidthHeight + i] =
-                        (((i >> 7) ^ (j >> 7)) & 1) ? Model::Color(180, 180, 180, 255)
-                                                    : Model::Color(80, 80, 80, 255);  // floor
+                        (((i >> 7) ^ (j >> 7)) & 1) ? Model::Color{180, 180, 180, 255}
+                                                    : Model::Color{80, 80, 80, 255};  // floor
                 if (k == 1)
                     tex_pixels[j * texWidthHeight + i] =
                         (((j / 4 & 15) == 0) ||
                          (((i / 4 & 15) == 0) && ((((i / 4 & 31) == 0) ^ ((j / 4 >> 4) & 1)) == 0)))
-                            ? Model::Color(60, 60, 60, 255)
-                            : Model::Color(180, 180, 180, 255);  // wall
+                            ? Model::Color{60, 60, 60, 255}
+                            : Model::Color{180, 180, 180, 255};  // wall
                 if (k == 2 || k == 4)
                     tex_pixels[j * texWidthHeight + i] =
-                        (i / 4 == 0 || j / 4 == 0) ? Model::Color(80, 80, 80, 255)
-                                                   : Model::Color(180, 180, 180, 255);  // ceiling
+                        (i / 4 == 0 || j / 4 == 0) ? Model::Color{80, 80, 80, 255}
+                                                   : Model::Color{180, 180, 180, 255};  // ceiling
                 if (k == 3)
-                    tex_pixels[j * texWidthHeight + i] = Model::Color(128, 128, 128, 255);  // blank
+                    tex_pixels[j * texWidthHeight + i] = Model::Color{128, 128, 128, 255};  // blank
             }
 
         generated_texture[k] = [device, deviceContext, texWidthHeight](unsigned char* data) {
@@ -712,76 +709,76 @@ Scene::Scene(ID3D11Device* device, ID3D11DeviceContext* deviceContext) {
     // Construct geometry
     unique_ptr<Model> m =
         make_unique<Model>(Vector3f(0, 0, 0), generated_texture[2]);  // Moving box
-    m->AddSolidColorBox(0, 0, 0, +1.0f, +1.0f, 1.0f, Model::Color(64, 64, 64));
+    m->AddSolidColorBox(0, 0, 0, +1.0f, +1.0f, 1.0f, Model::Color{64, 64, 64});
     m->AllocateBuffers(device);
     models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[1]);  // Walls
     m->AddSolidColorBox(-10.1f, 0.0f, -20.0f, -10.0f, 4.0f, 20.0f,
-                        Model::Color(128, 128, 128));  // Left Wall
+                        Model::Color{128, 128, 128});  // Left Wall
     m->AddSolidColorBox(-10.0f, -0.1f, -20.1f, 10.0f, 4.0f, -20.0f,
-                        Model::Color(128, 128, 128));  // Back Wall
+                        Model::Color{128, 128, 128});  // Back Wall
     m->AddSolidColorBox(10.0f, -0.1f, -20.0f, 10.1f, 4.0f, 20.0f,
-                        Model::Color(128, 128, 128));  // Right Wall
+                        Model::Color{128, 128, 128});  // Right Wall
     m->AllocateBuffers(device);
     models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[0]);  // Floors
     m->AddSolidColorBox(-10.0f, -0.1f, -20.0f, 10.0f, 0.0f, 20.1f,
-                        Model::Color(128, 128, 128));  // Main floor
+                        Model::Color{128, 128, 128});  // Main floor
     m->AddSolidColorBox(-15.0f, -6.1f, 18.0f, 15.0f, -6.0f, 30.0f,
-                        Model::Color(128, 128, 128));  // Bottom floor
+                        Model::Color{128, 128, 128});  // Bottom floor
     m->AllocateBuffers(device);
     models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[4]);  // Ceiling
-    m->AddSolidColorBox(-10.0f, 4.0f, -20.0f, 10.0f, 4.1f, 20.1f, Model::Color(128, 128, 128));
+    m->AddSolidColorBox(-10.0f, 4.0f, -20.0f, 10.0f, 4.1f, 20.1f, Model::Color{128, 128, 128});
     m->AllocateBuffers(device);
     models.emplace_back(move(m));
 
     m = make_unique<Model>(Vector3f(0, 0, 0), generated_texture[3]);  // Fixtures & furniture
     m->AddSolidColorBox(9.5f, 0.75f, 3.0f, 10.1f, 2.5f, 3.1f,
-                        Model::Color(96, 96, 96));  // Right side shelf// Verticals
+                        Model::Color{96, 96, 96});  // Right side shelf// Verticals
     m->AddSolidColorBox(9.5f, 0.95f, 3.7f, 10.1f, 2.75f, 3.8f,
-                        Model::Color(96, 96, 96));  // Right side shelf
+                        Model::Color{96, 96, 96});  // Right side shelf
     m->AddSolidColorBox(9.55f, 1.20f, 2.5f, 10.1f, 1.30f, 3.75f,
-                        Model::Color(96, 96, 96));  // Right side shelf// Horizontals
+                        Model::Color{96, 96, 96});  // Right side shelf// Horizontals
     m->AddSolidColorBox(9.55f, 2.00f, 3.05f, 10.1f, 2.10f, 4.2f,
-                        Model::Color(96, 96, 96));  // Right side shelf
+                        Model::Color{96, 96, 96});  // Right side shelf
     m->AddSolidColorBox(5.0f, 1.1f, 20.0f, 10.0f, 1.2f, 20.1f,
-                        Model::Color(96, 96, 96));  // Right railing
+                        Model::Color{96, 96, 96});  // Right railing
     m->AddSolidColorBox(-10.0f, 1.1f, 20.0f, -5.0f, 1.2f, 20.1f,
-                        Model::Color(96, 96, 96));  // Left railing
+                        Model::Color{96, 96, 96});  // Left railing
     for (float f = 5.0f; f <= 9.0f; f += 1.0f) {
         m->AddSolidColorBox(f, 0.0f, 20.0f, f + 0.1f, 1.1f, 20.1f,
-                            Model::Color(128, 128, 128));  // Left Bars
+                            Model::Color{128, 128, 128});  // Left Bars
         m->AddSolidColorBox(-f, 1.1f, 20.0f, -f - 0.1f, 0.0f, 20.1f,
-                            Model::Color(128, 128, 128));  // Right Bars
+                            Model::Color{128, 128, 128});  // Right Bars
     }
-    m->AddSolidColorBox(-1.8f, 0.8f, 1.0f, 0.0f, 0.7f, 0.0f, Model::Color(128, 128, 0));  // Table
+    m->AddSolidColorBox(-1.8f, 0.8f, 1.0f, 0.0f, 0.7f, 0.0f, Model::Color{128, 128, 0});  // Table
     m->AddSolidColorBox(-1.8f, 0.0f, 0.0f, -1.7f, 0.7f, 0.1f,
-                        Model::Color(128, 128, 0));  // Table Leg
+                        Model::Color{128, 128, 0});  // Table Leg
     m->AddSolidColorBox(-1.8f, 0.7f, 1.0f, -1.7f, 0.0f, 0.9f,
-                        Model::Color(128, 128, 0));  // Table Leg
+                        Model::Color{128, 128, 0});  // Table Leg
     m->AddSolidColorBox(0.0f, 0.0f, 1.0f, -0.1f, 0.7f, 0.9f,
-                        Model::Color(128, 128, 0));  // Table Leg
+                        Model::Color{128, 128, 0});  // Table Leg
     m->AddSolidColorBox(0.0f, 0.7f, 0.0f, -0.1f, 0.0f, 0.1f,
-                        Model::Color(128, 128, 0));  // Table Leg
+                        Model::Color{128, 128, 0});  // Table Leg
     m->AddSolidColorBox(-1.4f, 0.5f, -1.1f, -0.8f, 0.55f, -0.5f,
-                        Model::Color(44, 44, 128));  // Chair Set
+                        Model::Color{44, 44, 128});  // Chair Set
     m->AddSolidColorBox(-1.4f, 0.0f, -1.1f, -1.34f, 1.0f, -1.04f,
-                        Model::Color(44, 44, 128));  // Chair Leg 1
+                        Model::Color{44, 44, 128});  // Chair Leg 1
     m->AddSolidColorBox(-1.4f, 0.5f, -0.5f, -1.34f, 0.0f, -0.56f,
-                        Model::Color(44, 44, 128));  // Chair Leg 2
+                        Model::Color{44, 44, 128});  // Chair Leg 2
     m->AddSolidColorBox(-0.8f, 0.0f, -0.5f, -0.86f, 0.5f, -0.56f,
-                        Model::Color(44, 44, 128));  // Chair Leg 2
+                        Model::Color{44, 44, 128});  // Chair Leg 2
     m->AddSolidColorBox(-0.8f, 1.0f, -1.1f, -0.86f, 0.0f, -1.04f,
-                        Model::Color(44, 44, 128));  // Chair Leg 2
+                        Model::Color{44, 44, 128});  // Chair Leg 2
     m->AddSolidColorBox(-1.4f, 0.97f, -1.05f, -0.8f, 0.92f, -1.10f,
-                        Model::Color(44, 44, 128));  // Chair Back high bar
+                        Model::Color{44, 44, 128});  // Chair Back high bar
 
     for (float f = 3.0f; f <= 6.6f; f += 0.4f)
-        m->AddSolidColorBox(-3, 0.0f, f, -2.9f, 1.3f, f + 0.1f, Model::Color(64, 64, 64));  // Posts
+        m->AddSolidColorBox(-3, 0.0f, f, -2.9f, 1.3f, f + 0.1f, Model::Color{64, 64, 64});  // Posts
 
     m->AllocateBuffers(device);
     models.emplace_back(move(m));
